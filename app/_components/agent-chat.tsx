@@ -610,6 +610,7 @@ export function AgentChatSession({
   const [resumedEvents, setResumedEvents] = useState<HandleMessageStreamEvent[]>([]);
   const [isResuming, setIsResuming] = useState(false);
   const [localEvents, setLocalEvents] = useState<HandleMessageStreamEvent[]>([]);
+  const [localPendingUserMessage, setLocalPendingUserMessageState] = useState<string | null>(null);
   const [skippingAuthorizationKey, setSkippingAuthorizationKey] = useState<string | null>(null);
   const activeChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
   const eventIndexRef = useRef(activeChat?.events.length ?? 0);
@@ -621,6 +622,7 @@ export function AgentChatSession({
   const resumeStartedRef = useRef(false);
   const resumedEventsRef = useRef<HandleMessageStreamEvent[]>([]);
   const localEventsRef = useRef<HandleMessageStreamEvent[]>([]);
+  const localPendingUserMessageRef = useRef<string | null>(null);
   const onSessionStartedRef = useRef<(session: SessionState) => Promise<void> | void>(
     () => {},
   );
@@ -631,6 +633,11 @@ export function AgentChatSession({
   });
   const isSetupReady = setupStatus.appReady;
   const router = useRouter();
+
+  const setLocalPendingUserMessage = useCallback((message: string | null) => {
+    localPendingUserMessageRef.current = message;
+    setLocalPendingUserMessageState(message);
+  }, []);
 
   const persistSnapshot = useCallback(
     async (snapshot: AgentSnapshot) => {
@@ -743,22 +750,34 @@ export function AgentChatSession({
     [baseDisplayEvents, localEvents],
   );
   const displayMessages = hasResumeOverlay ? resumedData.messages : agent.data.messages;
-  const isBusy = isResuming || agent.status === "submitted" || agent.status === "streaming";
+  const isBusy =
+    isResuming ||
+    Boolean(localPendingUserMessage) ||
+    agent.status === "submitted" ||
+    agent.status === "streaming";
   const pendingMessage = pendingUserMessage
     ? createPendingUserMessage(chatId ?? activeChatId ?? "new", pendingUserMessage)
+    : null;
+  const localPendingMessage = localPendingUserMessage
+    ? createPendingUserMessage(
+        chatId ?? activeChatId ?? "new",
+        localPendingUserMessage,
+        "local-pending-user-message",
+      )
     : null;
   const pendingAuthorizations = getPendingAuthorizations(displayEvents);
   const isWaitingForAuthorization = pendingAuthorizations.length > 0;
   const disabledReason = isWaitingForAuthorization
     ? getConnectionAuthorizationDisabledReason(pendingAuthorizations)
     : undefined;
-  const visibleMessages =
-    pendingMessage && !hasLatestUserMessage(displayMessages, pendingUserMessage ?? "")
-      ? [...displayMessages, pendingMessage]
-      : displayMessages;
+  const visibleMessages = appendPendingUserMessages(displayMessages, [
+    pendingMessage,
+    localPendingMessage,
+  ]);
   const isEmpty = visibleMessages.length === 0 && !isBusy && !isWaitingForAuthorization;
   const isChatRoute = Boolean(shellActiveChatId || chatId);
-  const showThinking = !isWaitingForAuthorization && (Boolean(pendingMessage) || isBusy);
+  const showThinking =
+    !isWaitingForAuthorization && (Boolean(pendingMessage || localPendingMessage) || isBusy);
   const thinkingPresence = useThinkingPresence(showThinking);
   const displayError = clientError ?? agent.error?.message ?? null;
   const toastError = displayError && dismissedError !== displayError ? displayError : null;
@@ -777,9 +796,10 @@ export function AgentChatSession({
     localEventsRef.current = [];
     setResumedEvents([]);
     setLocalEvents([]);
+    setLocalPendingUserMessage(null);
     setIsResuming(false);
     setClientError(null);
-  }, [agent]);
+  }, [agent, setLocalPendingUserMessage]);
 
   const prepareSend = useCallback(
     async (firstMessage: string) => {
@@ -826,7 +846,7 @@ export function AgentChatSession({
     async (text: string, draftHandlers: DraftHandlers) => {
       const message = text.trim();
 
-      if (!message || isBusy) {
+      if (!message || isBusy || localPendingUserMessageRef.current) {
         return;
       }
 
@@ -836,11 +856,19 @@ export function AgentChatSession({
         return;
       }
 
+      const canShowLocalPending = Boolean(isSetupReady && viewer && activeChatIdRef.current);
+
+      if (canShowLocalPending) {
+        setLocalPendingUserMessage(message);
+        draftHandlers.clearDraft();
+      }
+
       let ready = false;
 
       try {
         ready = await prepareSend(message);
       } catch (error) {
+        setLocalPendingUserMessage(null);
         draftHandlers.restoreDraft(message);
         setClientError(error instanceof Error ? error.message : "Failed to prepare chat.");
         return;
@@ -852,6 +880,7 @@ export function AgentChatSession({
         if (chatId) {
           void clearChatPendingMessageAction(chatId);
         }
+        setLocalPendingUserMessage(null);
         draftHandlers.restoreDraft(message);
         return;
       }
@@ -859,9 +888,15 @@ export function AgentChatSession({
       const chatId = activeChatIdRef.current;
 
       if (!chatId) {
+        setLocalPendingUserMessage(null);
         draftHandlers.restoreDraft(message);
         setClientError("Chat is still getting ready.");
         return;
+      }
+
+      if (!canShowLocalPending) {
+        setLocalPendingUserMessage(message);
+        draftHandlers.clearDraft();
       }
 
       try {
@@ -871,12 +906,11 @@ export function AgentChatSession({
         });
         touchChat(updated);
       } catch (error) {
+        setLocalPendingUserMessage(null);
         draftHandlers.restoreDraft(message);
         setClientError(error instanceof Error ? error.message : "Failed to save pending message.");
         return;
       }
-
-      draftHandlers.clearDraft();
 
       try {
         await agent.send({
@@ -885,6 +919,7 @@ export function AgentChatSession({
         });
       } catch (error) {
         void clearChatPendingMessageAction(chatId);
+        setLocalPendingUserMessage(null);
         draftHandlers.restoreDraft(message);
         setClientError(error instanceof Error ? error.message : "Failed to send message.");
       }
@@ -894,9 +929,12 @@ export function AgentChatSession({
       disabledReason,
       enabledConnections,
       isBusy,
+      isSetupReady,
       isWaitingForAuthorization,
       prepareSend,
+      setLocalPendingUserMessage,
       touchChat,
+      viewer,
     ],
   );
 
@@ -1035,6 +1073,7 @@ export function AgentChatSession({
       knownInitialEventsRef.current = activeChat?.events ?? [];
       localEventsRef.current = [];
       setLocalEvents([]);
+      setLocalPendingUserMessage(null);
     } else if (!isBusy) {
       eventIndexRef.current = Math.max(eventIndexRef.current, nextEventIndex);
       if (activeChat) {
@@ -1043,7 +1082,14 @@ export function AgentChatSession({
     }
     setCurrentTitle(nextTitle);
     currentTitleRef.current = nextTitle;
-  }, [activeChat?.events.length, activeChat?.id, activeChat?.title, chatId, isBusy]);
+  }, [
+    activeChat?.events.length,
+    activeChat?.id,
+    activeChat?.title,
+    chatId,
+    isBusy,
+    setLocalPendingUserMessage,
+  ]);
 
   useEffect(() => {
     if (
@@ -1163,6 +1209,15 @@ export function AgentChatSession({
   useEffect(() => {
     setDismissedError(null);
   }, [displayError]);
+
+  useEffect(() => {
+    if (
+      localPendingUserMessage &&
+      hasLatestUserMessage(displayMessages, localPendingUserMessage)
+    ) {
+      setLocalPendingUserMessage(null);
+    }
+  }, [displayMessages, localPendingUserMessage, setLocalPendingUserMessage]);
 
   useEffect(() => {
     if (
@@ -1502,9 +1557,32 @@ function getLocalEventKey(event: HandleMessageStreamEvent) {
   return null;
 }
 
-function createPendingUserMessage(chatId: string, text: string): EveMessage {
+function appendPendingUserMessages(
+  messages: readonly EveMessageData["messages"][number][],
+  pendingMessages: readonly (EveMessage | null)[],
+) {
+  let nextMessages = messages;
+
+  for (const pendingMessage of pendingMessages) {
+    const pendingText = pendingMessage ? getMessageText(pendingMessage) : null;
+
+    if (!pendingMessage || !pendingText || hasLatestUserMessage(nextMessages, pendingText)) {
+      continue;
+    }
+
+    nextMessages = [...nextMessages, pendingMessage];
+  }
+
+  return nextMessages;
+}
+
+function createPendingUserMessage(
+  chatId: string,
+  text: string,
+  idSuffix = "pending-user-message",
+): EveMessage {
   return {
-    id: `${chatId}:pending-user-message`,
+    id: `${chatId}:${idSuffix}`,
     metadata: {
       optimistic: true,
       status: "submitted",
