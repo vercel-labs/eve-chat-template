@@ -181,7 +181,12 @@ fi
 
 # --- 6b. Optional: Notion connector -----------------------------------------
 step "Optional: Notion connector"
-read -r -p "  Set up the Notion MCP connector now? [y/N] " SETUP_NOTION </dev/tty
+if vercel env ls $SCOPE_FLAGS 2>/dev/null | grep -q 'NOTION_CONNECTOR'; then
+  echo "  NOTION_CONNECTOR already set, skipping Notion setup"
+  SETUP_NOTION="n"
+else
+  read -r -p "  Set up the Notion MCP connector now? [y/N] " SETUP_NOTION </dev/tty
+fi
 case "${SETUP_NOTION:-n}" in
   [yY]*)
     echo "  Creating connector (a browser may open to authorize Notion)..."
