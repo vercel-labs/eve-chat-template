@@ -89,21 +89,32 @@ set_env() {
   echo "  set $1"
 }
 
-# --- 3. Provision Neon Postgres (required) ----------------------------------
-step "Provisioning Neon Postgres"
-if vercel env ls 2>/dev/null | grep -q 'DATABASE_URL'; then
-  echo "  DATABASE_URL already present, skipping"
-else
-  vercel integration add neon $SCOPE_FLAGS
-fi
+# provision_integration LABEL SLUG ENV_MARKER — install a Marketplace integration
+# unless its env var is already present. Some integrations (e.g. Upstash) punt to
+# the browser for additional setup and don't set their env vars until that
+# finishes (the CLI also exits non-zero in that case). When the marker isn't set
+# afterward, ask the user to finish in the browser and re-run — the idempotency
+# checks throughout this script skip everything already completed.
+provision_integration() {
+  local label="$1" slug="$2" marker="$3"
+  if vercel env ls $SCOPE_FLAGS 2>/dev/null | grep -q "$marker"; then
+    echo "  $marker already present, skipping"
+    return
+  fi
+  vercel integration add "$slug" $SCOPE_FLAGS || true
+  if ! vercel env ls $SCOPE_FLAGS 2>/dev/null | grep -q "$marker"; then
+    warn "$label needs additional setup in the browser — finish connecting it to this project."
+    warn "Then re-run this script to continue (completed steps are detected and skipped)."
+    exit 0
+  fi
+}
 
-# --- 3. Provision Upstash Redis (required) ----------------------------------
+# --- 3. Provision required storage ------------------------------------------
+step "Provisioning Neon Postgres"
+provision_integration "Neon" neon DATABASE_URL
+
 step "Provisioning Upstash Redis"
-if vercel env ls 2>/dev/null | grep -q 'KV_REST_API_URL'; then
-  echo "  KV_REST_API_URL already present, skipping"
-else
-  vercel integration add upstash-kv $SCOPE_FLAGS
-fi
+provision_integration "Upstash Redis" upstash-kv KV_REST_API_URL
 
 # --- 4. Better Auth secret --------------------------------------------------
 step "Setting BETTER_AUTH_SECRET"
