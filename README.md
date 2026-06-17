@@ -1,12 +1,25 @@
 # Eve Chat Template
 
-A persisted Next.js chat template for [Eve](https://beta.eve.dev), built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.
+A persisted Next.js chat template for [Eve](https://beta.eve.dev), built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, and Neon.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=eve-chat-template&repository-name=eve-chat-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Ftree%2Fmain&env=BETTER_AUTH_SECRET%2CNEXT_PUBLIC_VERCEL_APP_CLIENT_ID%2CVERCEL_APP_CLIENT_SECRET&envDescription=Neon+provisions+DATABASE_URL.+Upstash+Redis+provisions+rate-limit+storage.+Add+Better+Auth+secret+and+Sign+in+with+Vercel+credentials.+After+deploy%2C+run+production+migrations+from+the+setup+guide.&envLink=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Fblob%2Fmain%2Fdocs%2Fsetup-and-deploy.md&products=%5B%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22neon%22%2C%22integrationSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22integrationSlug%22%3A%22upstash%22%7D%5D)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=eve-chat-template&repository-name=eve-chat-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Ftree%2Fmain&env=BETTER_AUTH_SECRET%2CBETTER_AUTH_URL%2CNEXT_PUBLIC_VERCEL_APP_CLIENT_ID%2CVERCEL_APP_CLIENT_SECRET&envDescription=Neon+provisions+DATABASE_URL.+Upstash+Redis+adds+optional+rate-limit+storage.+Vercel+Connect+provisions+NOTION_CONNECTOR.+Add+Better+Auth+URL%2Fsecret+and+Sign+in+with+Vercel+credentials.&envLink=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Fblob%2Fmain%2Fdocs%2Fsetup-and-deploy.md&products=%5B%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22neon%22%2C%22integrationSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22integrationSlug%22%3A%22upstash%22%7D%5D&connect=%5B%7B%22type%22%3A%22mcp.notion.com%22%2C%22env%22%3A%22NOTION_CONNECTOR%22%7D%5D)
+
+## Quick Start
+
+Two ways to get going:
+
+- **One-click:** use the **Deploy with Vercel** button above to clone and provision storage, then run migrations (see [Setup and Deployment](docs/setup-and-deploy.md#one-click-deploy)).
+- **Local script:** clone the repo and run the setup script. It links the project, provisions Neon, sets the environment variables through the Vercel API, pulls them locally, and runs migrations — pausing once for you to paste your Sign in with Vercel OAuth credentials (the only dashboard-only step).
+
+```bash
+./scripts/setup.sh
+```
+
+The script needs the `vercel` CLI, `node`, `pnpm`, and `openssl`. Prefer to do it by hand? Follow the sequential steps below, or the full [Setup and Deployment](docs/setup-and-deploy.md) guide.
 
 ## Getting Started
 
-For the full local setup, storage provisioning, Sign in with Vercel credentials, and production deploy flow, see [Setup and Deployment](docs/setup-and-deploy.md). For the runtime architecture, streaming model, persistence flow, and extension points, see [How the Chatbot Works](docs/how-the-chatbot-works.md).
+For the full local setup, storage provisioning, Sign in with Vercel credentials, and production deploy flow, see [Setup and Deployment](docs/setup-and-deploy.md).
 
 Install dependencies with pnpm:
 
