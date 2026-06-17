@@ -111,51 +111,62 @@ set_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)" encrypted '["production"
 
 # --- 5. Sign in with Vercel OAuth app ---------------------------------------
 step "Sign in with Vercel OAuth app"
-APPS_URL="https://vercel.com/${TEAM_SLUG:-dashboard}/~/settings/apps"
-CALLBACK_PATH="/api/auth/callback/vercel"
-LOCAL_CALLBACK="http://localhost:3000$CALLBACK_PATH"
-
-# Try to register the app automatically via the OAuth Apps API. The name and
-# slug must be globally unique, so we derive them from the project id. The email
-# scope is requested up front, and both callback forms are registered: the local
-# URL (redirectUris) and the linked project + path (projectRedirectUris), which
-# covers all of the project's production and preview domains.
-CLIENT_ID=""
-CLIENT_SECRET=""
-APP_SLUG=$(node -e 'const p=(process.argv[1]||"eve-chat").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");const s=(process.argv[2]||"").replace(/[^a-zA-Z0-9]/g,"").slice(-8).toLowerCase();console.log(((p?p+"-":"eve-chat-")+s).slice(0,60))' "$PROJECT_SLUG" "$PROJECT_ID")
-APP_NAME="${PROJECT_SLUG:-$APP_SLUG}"
-
-echo "  Registering OAuth app \"$APP_NAME\" via the Vercel API..."
-APP_JSON=$(node -e 'const [name,slug,projectId]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,slug,scopes:["email","profile","offline_access"],redirectUris:["http://localhost:3000/api/auth/callback/vercel"],projectRedirectUris:[{projectId,path:"/api/auth/callback/vercel"}]}))' "$APP_NAME" "$APP_SLUG" "$PROJECT_ID" \
-  | vercel api "/oauth-apps" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || APP_JSON=""
-CLIENT_ID=$(printf '%s' "$APP_JSON" | json_field clientId)
-
-if [ -n "$CLIENT_ID" ]; then
-  echo "  created app: $CLIENT_ID"
+if vercel env ls $SCOPE_FLAGS 2>/dev/null | grep -q 'NEXT_PUBLIC_VERCEL_APP_CLIENT_ID'; then
+  echo "  NEXT_PUBLIC_VERCEL_APP_CLIENT_ID already set, skipping OAuth app setup"
 else
-  # Re-run recovery: an app with this slug may already exist from a prior run.
-  CLIENT_ID=$(api_get "/oauth-apps/$APP_SLUG" | json_field clientId)
-  [ -n "$CLIENT_ID" ] && echo "  reusing existing app: $CLIENT_ID"
-fi
+  APPS_URL="https://vercel.com/${TEAM_SLUG:-dashboard}/~/settings/apps"
 
-if [ -n "$CLIENT_ID" ]; then
-  SECRET_JSON=$(echo '{}' | vercel api "/oauth-apps/$CLIENT_ID/secret?clientId=$CLIENT_ID" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || SECRET_JSON=""
-  CLIENT_SECRET=$(printf '%s' "$SECRET_JSON" | json_field clientSecret)
-  if [ -n "$CLIENT_SECRET" ]; then
-    echo "  generated client secret"
+  # Register the app via the OAuth Apps API. The name and slug must be globally
+  # unique, so the slug is derived from the project id. The email/profile/
+  # offline_access scopes are requested up front, and both callback forms are
+  # registered: the local URL (redirectUris) and the linked project + path
+  # (projectRedirectUris), which covers the project's production and preview domains.
+  CLIENT_ID=""
+  CLIENT_SECRET=""
+  APP_SLUG=$(node -e 'const p=(process.argv[1]||"eve-chat").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");const s=(process.argv[2]||"").replace(/[^a-zA-Z0-9]/g,"").slice(-8).toLowerCase();console.log(((p?p+"-":"eve-chat-")+s).slice(0,60))' "$PROJECT_SLUG" "$PROJECT_ID")
+  APP_NAME="${PROJECT_SLUG:-$APP_SLUG}"
+
+  echo "  Registering OAuth app \"$APP_NAME\" via the Vercel API..."
+  APP_JSON=$(node -e 'const [name,slug,projectId]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,slug,scopes:["email","profile","offline_access"],redirectUris:["http://localhost:3000/api/auth/callback/vercel"],projectRedirectUris:[{projectId,path:"/api/auth/callback/vercel"}]}))' "$APP_NAME" "$APP_SLUG" "$PROJECT_ID" \
+    | vercel api "/oauth-apps" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || APP_JSON=""
+  CLIENT_ID=$(printf '%s' "$APP_JSON" | json_field clientId)
+
+  if [ -n "$CLIENT_ID" ]; then
+    echo "  created app: $CLIENT_ID"
   else
-    warn "Could not generate a client secret automatically (an app can hold at most two)."
-    warn "Generate one in the dashboard and paste it: $APPS_URL"
-    while [ -z "$CLIENT_SECRET" ]; do
-      read -r -s -p "  Paste the client secret: " CLIENT_SECRET </dev/tty; echo
-    done
+    # An app with this slug may already exist from a prior run; reuse it.
+    CLIENT_ID=$(api_get "/oauth-apps/$APP_SLUG" | json_field clientId)
+    [ -n "$CLIENT_ID" ] && echo "  reusing existing app: $CLIENT_ID"
   fi
-else
-  warn "OAuth app already registered, skipping"
-fi
 
-set_env NEXT_PUBLIC_VERCEL_APP_CLIENT_ID "$CLIENT_ID" plain '["production","preview","development"]'
-set_env VERCEL_APP_CLIENT_SECRET "$CLIENT_SECRET" encrypted '["production","preview","development"]'
+  if [ -n "$CLIENT_ID" ]; then
+    SECRET_JSON=$(echo '{}' | vercel api "/oauth-apps/$CLIENT_ID/secret?clientId=$CLIENT_ID" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || SECRET_JSON=""
+    CLIENT_SECRET=$(printf '%s' "$SECRET_JSON" | json_field clientSecret)
+    if [ -n "$CLIENT_SECRET" ]; then
+      echo "  generated client secret"
+    else
+      warn "Could not generate a client secret automatically (an app can hold at most two)."
+      warn "Generate one in the dashboard and paste it: $APPS_URL"
+      while [ -z "$CLIENT_SECRET" ]; do
+        read -r -s -p "  Paste the client secret: " CLIENT_SECRET </dev/tty; echo
+      done
+    fi
+  else
+    warn "Could not register or find the OAuth app automatically."
+  fi
+
+  # Only write values we actually resolved, so a partial run never clears them.
+  if [ -n "$CLIENT_ID" ]; then
+    set_env NEXT_PUBLIC_VERCEL_APP_CLIENT_ID "$CLIENT_ID" plain '["production","preview","development"]'
+  else
+    warn "No client ID resolved; leaving NEXT_PUBLIC_VERCEL_APP_CLIENT_ID unchanged."
+  fi
+  if [ -n "$CLIENT_SECRET" ]; then
+    set_env VERCEL_APP_CLIENT_SECRET "$CLIENT_SECRET" encrypted '["production","preview","development"]'
+  else
+    warn "No client secret resolved; leaving VERCEL_APP_CLIENT_SECRET unchanged."
+  fi
+fi
 
 # --- 6. Better Auth URL (production origin) ---------------------------------
 step "Resolving production domain for BETTER_AUTH_URL"
@@ -224,4 +235,3 @@ fi
 # --- 10. Done ---------------------------------------------------------------
 step "Setup complete"
 bold "Start the app:  pnpm dev"
-warn "If sign-in fails with email_not_found, grant the email scope on your OAuth app and retry."
