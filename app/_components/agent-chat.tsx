@@ -725,6 +725,7 @@ export function AgentChatSession({
   const resumeStartedRef = useRef(false);
   const resumedEventsRef = useRef<HandleMessageStreamEvent[]>([]);
   const streamEventsRef = useRef<HandleMessageStreamEvent[]>([]);
+  const streamEventsFrameRef = useRef<number | null>(null);
   const localEventsRef = useRef<HandleMessageStreamEvent[]>([]);
   const finalizeTimerRef = useRef<number | null>(null);
   const onSessionStartedRef = useRef<(session: SessionState) => Promise<void> | void>(
@@ -764,6 +765,37 @@ export function AgentChatSession({
       setIsFinalizingTurn(false);
     }, TURN_FINALIZE_SETTLE_DELAY_MS);
   }, [clearFinalizeTimer]);
+
+  const cancelStreamEventsStateSync = useCallback(() => {
+    if (streamEventsFrameRef.current === null) {
+      return;
+    }
+
+    window.cancelAnimationFrame(streamEventsFrameRef.current);
+    streamEventsFrameRef.current = null;
+  }, []);
+
+  const scheduleStreamEventsStateSync = useCallback(() => {
+    if (streamEventsFrameRef.current !== null) {
+      return;
+    }
+
+    streamEventsFrameRef.current = window.requestAnimationFrame(() => {
+      streamEventsFrameRef.current = null;
+      setStreamEvents(streamEventsRef.current);
+    });
+  }, []);
+
+  const flushStreamEventsState = useCallback(() => {
+    cancelStreamEventsStateSync();
+    setStreamEvents(streamEventsRef.current);
+  }, [cancelStreamEventsStateSync]);
+
+  const clearStreamEvents = useCallback(() => {
+    cancelStreamEventsStateSync();
+    streamEventsRef.current = [];
+    setStreamEvents([]);
+  }, [cancelStreamEventsStateSync]);
 
   const persistSnapshot = useCallback(
     async (snapshot: AgentSnapshot) => {
@@ -839,7 +871,7 @@ export function AgentChatSession({
 
       if (nextStreamEvents !== streamEventsRef.current) {
         streamEventsRef.current = nextStreamEvents;
-        setStreamEvents(nextStreamEvents);
+        scheduleStreamEventsStateSync();
       }
 
       if (displayEvent.type === "authorization.required") {
@@ -865,7 +897,7 @@ export function AgentChatSession({
         );
       });
     },
-    [stopFinalizingTurn, viewer],
+    [scheduleStreamEventsStateSync, stopFinalizingTurn, viewer],
   );
 
   const persistSessionState = useCallback(
@@ -897,6 +929,7 @@ export function AgentChatSession({
     session: persistedSessionRef.current,
     onEvent: persistStreamEvent,
     onFinish: (snapshot) => {
+      flushStreamEventsState();
       void persistSnapshot(snapshot);
     },
   });
@@ -911,11 +944,26 @@ export function AgentChatSession({
     [activeChat?.events, streamEvents],
   );
   const baseDisplayEvents = hasResumeOverlay ? resumedEventLog : agentEventLog;
-  const displayEvents = useMemo(
+  const persistedDisplayEvents = useMemo(
     () => mergeLocalEvents(baseDisplayEvents, localEvents),
     [baseDisplayEvents, localEvents],
   );
-  const displayData = useMemo(() => reduceEventsToMessageData(displayEvents), [displayEvents]);
+  const shouldUseLiveAgentProjection =
+    !hasResumeOverlay &&
+    localEvents.length === 0 &&
+    (agent.status === "submitted" ||
+      agent.status === "streaming" ||
+      streamEvents.length !== streamEventsRef.current.length);
+  const displayEvents = shouldUseLiveAgentProjection
+    ? agent.events
+    : persistedDisplayEvents;
+  const displayData = useMemo(
+    () =>
+      shouldUseLiveAgentProjection
+        ? agent.data
+        : reduceEventsToMessageData(displayEvents),
+    [agent.data, displayEvents, shouldUseLiveAgentProjection],
+  );
   const displayMessages = displayData.messages;
   const displayChatId = chatId ?? activeChatId ?? "new";
   const hasLocalPendingUserMessage = Boolean(localPendingUserMessage);
@@ -970,16 +1018,15 @@ export function AgentChatSession({
     currentTitleRef.current = "New chat";
     resumeStartedRef.current = false;
     resumedEventsRef.current = [];
-    streamEventsRef.current = [];
     localEventsRef.current = [];
     setResumedEvents([]);
-    setStreamEvents([]);
+    clearStreamEvents();
     setLocalEvents([]);
     stopFinalizingTurn();
     clearLocalPendingUserMessage();
     setIsResuming(false);
     setClientError(null);
-  }, [agent, clearLocalPendingUserMessage, stopFinalizingTurn]);
+  }, [agent, clearLocalPendingUserMessage, clearStreamEvents, stopFinalizingTurn]);
 
   const prepareSend = useCallback(
     async (firstMessage: string) => {
@@ -1284,9 +1331,8 @@ export function AgentChatSession({
       eventIndexChatIdRef.current = nextChatId;
       eventIndexRef.current = nextEventIndex;
       knownInitialEventsRef.current = activeChat?.events ?? [];
-      streamEventsRef.current = [];
       localEventsRef.current = [];
-      setStreamEvents([]);
+      clearStreamEvents();
       setLocalEvents([]);
       stopFinalizingTurn();
       clearLocalPendingUserMessage();
@@ -1303,6 +1349,7 @@ export function AgentChatSession({
     activeChat?.id,
     activeChat?.title,
     chatId,
+    clearStreamEvents,
     clearLocalPendingUserMessage,
     isTurnBlocked,
     stopFinalizingTurn,
@@ -1311,6 +1358,10 @@ export function AgentChatSession({
   useEffect(() => {
     return clearFinalizeTimer;
   }, [clearFinalizeTimer]);
+
+  useEffect(() => {
+    return cancelStreamEventsStateSync;
+  }, [cancelStreamEventsStateSync]);
 
   useEffect(() => {
     if (
