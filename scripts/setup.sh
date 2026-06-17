@@ -94,7 +94,7 @@ step "Provisioning Neon Postgres"
 if vercel env ls 2>/dev/null | grep -q 'DATABASE_URL'; then
   echo "  DATABASE_URL already present, skipping"
 else
-  vercel integration add neon --scope $TEAM_SLUG
+  vercel integration add neon $SCOPE_FLAGS
 fi
 
 # --- 3. Provision Upstash Redis (required) ----------------------------------
@@ -102,7 +102,7 @@ step "Provisioning Upstash Redis"
 if vercel env ls 2>/dev/null | grep -q 'KV_REST_API_URL'; then
   echo "  KV_REST_API_URL already present, skipping"
 else
-  vercel integration add upstash-kv --scope $TEAM_SLUG
+  vercel integration add upstash-kv $SCOPE_FLAGS
 fi
 
 # --- 4. Better Auth secret --------------------------------------------------
