@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+#
+# Eve Chat Template — one-shot setup.
+#
+# Links the Vercel project, provisions Neon, registers the "Sign in with Vercel"
+# OAuth app, sets every environment variable through the Vercel API, pulls them
+# locally, and runs database migrations.
+#
+# The OAuth app is created via the Vercel API (email scope + callback URLs set
+# automatically). If that API is unavailable, the script falls back to a guided
+# manual dashboard flow.
+#
+# Requires: vercel CLI, node, pnpm, openssl. Run from the repo root:
+#   ./scripts/setup.sh [team-slug]        # or: ./scripts/setup.sh --scope <team-slug>
+# The team scope is optional; when omitted it is taken from the linked project.
+#
+set -euo pipefail
+
+step() { printf '\n\033[1;36m==>\033[0m %s\n' "$1"; }
+warn() { printf '\033[1;33m !\033[0m %s\n' "$1"; }
+bold() { printf '\033[1m%s\033[0m\n' "$1"; }
+
+# --- 0. Prerequisites -------------------------------------------------------
+for cmd in vercel node pnpm openssl; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required command: $cmd"; exit 1; }
+done
+
+NODE_MAJOR=$(node -e 'console.log(process.versions.node.split(".")[0])')
+if [ "$NODE_MAJOR" -lt 24 ]; then
+  echo "Eve requires Node.js 24 or newer. You are running $(node -v). Please upgrade Node.js and try again."
+  exit 1
+fi
+
+# --- Optional team scope ----------------------------------------------------
+# Accept the team slug as `--scope <slug>` or as the first positional argument.
+# Everything (linking + all vercel api calls) is scoped to it. When omitted it
+# is resolved from the linked project's team.
+TEAM_SCOPE=""
+case "${1:-}" in
+  --scope) TEAM_SCOPE="${2:-}" ;;
+  --scope=*) TEAM_SCOPE="${1#--scope=}" ;;
+  -*) ;;
+  ?*) TEAM_SCOPE="$1" ;;
+esac
+SCOPE_FLAGS=""
+[ -n "$TEAM_SCOPE" ] && SCOPE_FLAGS="--scope $TEAM_SCOPE"
+
+# --- 1. Dependencies --------------------------------------------------------
+step "Installing dependencies"
+pnpm install
+
+# --- 2. Link the Vercel project --------------------------------------------
+step "Linking Vercel project"
+if [ ! -f .vercel/project.json ]; then
+  vercel link $SCOPE_FLAGS
+fi
+PROJECT_ID=$(node -e 'console.log(require("./.vercel/project.json").projectId)')
+TEAM_ID=$(node -e 'console.log(require("./.vercel/project.json").orgId)')
+
+# json_field FIELD_PATH — read JSON from stdin and print a dotted field (or "").
+json_field() {
+  node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const o=JSON.parse(s);console.log(process.argv[1].split(".").reduce((a,k)=>(a&&a[k]!=null)?a[k]:undefined,o)??"")}catch{console.log("")}})' "$1"
+}
+
+# api_get PATH — GET JSON, team-scoped; prints "" on failure, never aborts the
+# script under `set -e`/`pipefail`. All vercel api calls use --scope (the team
+# slug), which is more reliable than passing teamId as a query parameter.
+api_get() { vercel api "$1" $SCOPE_FLAGS 2>/dev/null || true; }
+
+# Resolve the team slug. Use the provided scope if any; otherwise look it up from
+# the linked project's team (addressed by id in the path, so it needs no scope).
+if [ -n "$TEAM_SCOPE" ]; then
+  TEAM_SLUG="$TEAM_SCOPE"
+else
+  TEAM_SLUG=$(api_get "/v2/teams/$TEAM_ID" | json_field slug)
+  [ -n "$TEAM_SLUG" ] && SCOPE_FLAGS="--scope $TEAM_SLUG"
+fi
+PROJECT_SLUG=$(api_get "/v9/projects/$PROJECT_ID" | json_field name)
+[ -n "$PROJECT_SLUG" ] && echo "  project: $PROJECT_SLUG${TEAM_SLUG:+  (team: $TEAM_SLUG)}"
+
+# set_env KEY VALUE TYPE TARGETS_JSON
+# Builds the JSON body with node (proper escaping) and upserts via the API,
+# which writes to all listed targets — including all Preview branches — without
+# the Git-branch prompt that blocks `vercel env add`.
+set_env() {
+  node -e 'const [k,v,t,tg]=process.argv.slice(1);process.stdout.write(JSON.stringify({key:k,value:v,type:t,target:JSON.parse(tg)}))' \
+    "$1" "$2" "$3" "$4" \
+    | vercel api "/v10/projects/$PROJECT_ID/env?upsert=true" $SCOPE_FLAGS -X POST --input - >/dev/null
+  echo "  set $1"
+}
+
+# --- 3. Provision Neon Postgres (required) ----------------------------------
+step "Provisioning Neon Postgres"
+if vercel env ls 2>/dev/null | grep -q 'DATABASE_URL'; then
+  echo "  DATABASE_URL already present, skipping"
+else
+  vercel integration add neon --scope $TEAM_SLUG
+fi
+
+# --- 4. Better Auth secret --------------------------------------------------
+step "Setting BETTER_AUTH_SECRET"
+set_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)" encrypted '["production","preview","development"]'
+
+# --- 5. Sign in with Vercel OAuth app ---------------------------------------
+step "Sign in with Vercel OAuth app"
+APPS_URL="https://vercel.com/${TEAM_SLUG:-dashboard}/~/settings/apps"
+CALLBACK_PATH="/api/auth/callback/vercel"
+LOCAL_CALLBACK="http://localhost:3000$CALLBACK_PATH"
+
+# manual_oauth — guided dashboard fallback. Sets CLIENT_ID and CLIENT_SECRET.
+manual_oauth() {
+  ack() {
+    printf '%b\n' "$1"
+    read -r -p "     Press Enter when done... " _ </dev/tty
+    printf '     \033[1;32m✓ done\033[0m\n\n'
+  }
+  echo "  Complete each step in the dashboard, confirming after each one:"
+  echo
+  ack "  1. Create the app — open $APPS_URL\n     (Settings -> Apps -> Create), choose a name, and Save."
+  ack "  2. Set the custom-domain callback URL (for local dev):\n     add $LOCAL_CALLBACK"
+  ack "  3. Link your project & set its callback URL:\n     select \"${PROJECT_SLUG:-your project}\" from the dropdown, then add path $CALLBACK_PATH"
+  ack "  4. Set the email scope — open Permissions and enable openid + email.\n     Without email, login fails with email_not_found."
+  CLIENT_SECRET=""
+  while [ -z "$CLIENT_SECRET" ]; do
+    read -r -s -p "  5. Generate a client secret and paste it here: " CLIENT_SECRET </dev/tty; echo
+  done
+  printf '     \033[1;32m✓ done\033[0m\n\n'
+  CLIENT_ID=""
+  while [ -z "$CLIENT_ID" ]; do
+    read -r -p "  6. Paste the client ID: " CLIENT_ID </dev/tty
+  done
+  printf '     \033[1;32m✓ done\033[0m\n'
+}
+
+# Try to register the app automatically via the OAuth Apps API. The name and
+# slug must be globally unique, so we derive them from the project id. The email
+# scope is requested up front, and both callback forms are registered: the local
+# URL (redirectUris) and the linked project + path (projectRedirectUris), which
+# covers all of the project's production and preview domains.
+CLIENT_ID=""
+CLIENT_SECRET=""
+APP_SLUG=$(node -e 'const p=(process.argv[1]||"eve-chat").toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");const s=(process.argv[2]||"").replace(/[^a-zA-Z0-9]/g,"").slice(-8).toLowerCase();console.log(((p?p+"-":"eve-chat-")+s).slice(0,60))' "$PROJECT_SLUG" "$PROJECT_ID")
+APP_NAME="${PROJECT_SLUG:-$APP_SLUG}"
+
+echo "  Registering OAuth app \"$APP_NAME\" via the Vercel API..."
+APP_JSON=$(node -e 'const [name,slug,projectId]=process.argv.slice(1);process.stdout.write(JSON.stringify({name,slug,scopes:["email","profile","offline_access"],redirectUris:["http://localhost:3000/api/auth/callback/vercel"],projectRedirectUris:[{projectId,path:"/api/auth/callback/vercel"}]}))' "$APP_NAME" "$APP_SLUG" "$PROJECT_ID" \
+  | vercel api "/oauth-apps" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || APP_JSON=""
+CLIENT_ID=$(printf '%s' "$APP_JSON" | json_field clientId)
+
+if [ -n "$CLIENT_ID" ]; then
+  echo "  created app: $CLIENT_ID"
+else
+  # Re-run recovery: an app with this slug may already exist from a prior run.
+  CLIENT_ID=$(api_get "/oauth-apps/$APP_SLUG" | json_field clientId)
+  [ -n "$CLIENT_ID" ] && echo "  reusing existing app: $CLIENT_ID"
+fi
+
+if [ -n "$CLIENT_ID" ]; then
+  SECRET_JSON=$(echo '{}' | vercel api "/oauth-apps/$CLIENT_ID/secret?clientId=$CLIENT_ID" $SCOPE_FLAGS -X POST --input - 2>/dev/null) || SECRET_JSON=""
+  CLIENT_SECRET=$(printf '%s' "$SECRET_JSON" | json_field clientSecret)
+  if [ -n "$CLIENT_SECRET" ]; then
+    echo "  generated client secret"
+  else
+    warn "Could not generate a client secret automatically (an app can hold at most two)."
+    warn "Generate one in the dashboard and paste it: $APPS_URL"
+    while [ -z "$CLIENT_SECRET" ]; do
+      read -r -s -p "  Paste the client secret: " CLIENT_SECRET </dev/tty; echo
+    done
+  fi
+else
+  warn "Automatic OAuth app registration was not available. Falling back to manual setup."
+  manual_oauth
+fi
+
+set_env NEXT_PUBLIC_VERCEL_APP_CLIENT_ID "$CLIENT_ID" plain '["production","preview","development"]'
+set_env VERCEL_APP_CLIENT_SECRET "$CLIENT_SECRET" encrypted '["production","preview","development"]'
+
+# --- 6. Better Auth URL (production origin) ---------------------------------
+step "Resolving production domain for BETTER_AUTH_URL"
+DOMAIN=$(api_get "/v9/projects/$PROJECT_ID/domains" \
+  | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const d=(JSON.parse(s).domains||[]);const m=d.find(x=>x.name.endsWith(".vercel.app"))||d[0];console.log(m?m.name:"")}catch{console.log("")}})')
+if [ -n "$DOMAIN" ]; then
+  set_env BETTER_AUTH_URL "https://$DOMAIN" plain '["production","preview"]'
+  echo "  production domain: https://$DOMAIN"
+else
+  warn "Could not resolve a production domain. Set BETTER_AUTH_URL on Production/Preview manually."
+fi
+
+# --- 6b. Optional: Notion connector -----------------------------------------
+step "Optional: Notion connector"
+read -r -p "  Set up the Notion MCP connector now? [y/N] " SETUP_NOTION </dev/tty
+case "${SETUP_NOTION:-n}" in
+  [yY]*)
+    echo "  Creating connector (a browser may open to authorize Notion)..."
+    NOTION_JSON=$(vercel connect create mcp.notion.com --name notion --format json) || NOTION_JSON=""
+    NOTION_UID=$(printf '%s' "$NOTION_JSON" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const o=JSON.parse(s);const c=o.connector||o;console.log(c.uid||c.id||"")}catch{console.log("")}})')
+    if [ -n "$NOTION_UID" ]; then
+      echo "  connector: $NOTION_UID"
+      vercel connect attach "$NOTION_UID" --yes >/dev/null \
+        || warn "Could not attach the connector automatically; attach it from the dashboard if needed."
+      set_env NOTION_CONNECTOR "$NOTION_UID" encrypted '["production","preview","development"]'
+    else
+      warn "Could not determine the connector UID. Create it manually and set NOTION_CONNECTOR (see docs/setup-and-deploy.md, step 6)."
+    fi
+    ;;
+  *)
+    echo "  Skipped. The app falls back to a connector named \"notion\" if NOTION_CONNECTOR is unset."
+    ;;
+esac
+
+# --- 7. Pull environment variables locally ----------------------------------
+step "Pulling environment variables to .env.local"
+vercel env pull .env.local --yes
+# BETTER_AUTH_URL is only set for Production/Preview; local dev uses localhost.
+if ! grep -q '^BETTER_AUTH_URL=' .env.local 2>/dev/null; then
+  echo 'BETTER_AUTH_URL=http://localhost:3000' >> .env.local
+  echo "  added BETTER_AUTH_URL=http://localhost:3000 for local dev"
+fi
+
+# --- 8. Ensure DATABASE_URL is available locally for migrations -------------
+if ! grep -q '^DATABASE_URL=' .env.local 2>/dev/null; then
+  warn "DATABASE_URL is not in .env.local — Neon marks it sensitive and enables it"
+  warn "for Production/Preview only, so it is not pulled. Enable it for the"
+  warn "Development environment in the dashboard, or paste the Neon connection string."
+  read -r -p "Paste DATABASE_URL (leave empty to skip migrations): " DBURL
+  if [ -n "$DBURL" ]; then
+    grep -v '^DATABASE_URL=' .env.local > .env.local.tmp 2>/dev/null || true
+    mv -f .env.local.tmp .env.local 2>/dev/null || true
+    echo "DATABASE_URL=$DBURL" >> .env.local
+  fi
+fi
+
+# --- 9. Database migrations -------------------------------------------------
+if grep -q '^DATABASE_URL=' .env.local 2>/dev/null; then
+  step "Running database migrations"
+  set -a; . ./.env.local; set +a
+  pnpm db:migrate
+else
+  warn "Skipping migrations — DATABASE_URL missing. Run 'pnpm db:migrate' after setting it."
+fi
+
+# --- 10. Done ---------------------------------------------------------------
+step "Setup complete"
+bold "Start the app:  pnpm dev"
+warn "If sign-in fails with email_not_found, grant the email scope on your OAuth app and retry."
