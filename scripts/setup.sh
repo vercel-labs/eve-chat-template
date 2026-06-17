@@ -97,6 +97,14 @@ else
   vercel integration add neon --scope $TEAM_SLUG
 fi
 
+# --- 3. Provision Upstash Redis (required) ----------------------------------
+step "Provisioning Upstash Redis"
+if vercel env ls 2>/dev/null | grep -q 'KV_REST_API_URL'; then
+  echo "  KV_REST_API_URL already present, skipping"
+else
+  vercel integration add upstash-kv --scope $TEAM_SLUG
+fi
+
 # --- 4. Better Auth secret --------------------------------------------------
 step "Setting BETTER_AUTH_SECRET"
 set_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)" encrypted '["production","preview","development"]'
@@ -106,31 +114,6 @@ step "Sign in with Vercel OAuth app"
 APPS_URL="https://vercel.com/${TEAM_SLUG:-dashboard}/~/settings/apps"
 CALLBACK_PATH="/api/auth/callback/vercel"
 LOCAL_CALLBACK="http://localhost:3000$CALLBACK_PATH"
-
-# manual_oauth — guided dashboard fallback. Sets CLIENT_ID and CLIENT_SECRET.
-manual_oauth() {
-  ack() {
-    printf '%b\n' "$1"
-    read -r -p "     Press Enter when done... " _ </dev/tty
-    printf '     \033[1;32m✓ done\033[0m\n\n'
-  }
-  echo "  Complete each step in the dashboard, confirming after each one:"
-  echo
-  ack "  1. Create the app — open $APPS_URL\n     (Settings -> Apps -> Create), choose a name, and Save."
-  ack "  2. Set the custom-domain callback URL (for local dev):\n     add $LOCAL_CALLBACK"
-  ack "  3. Link your project & set its callback URL:\n     select \"${PROJECT_SLUG:-your project}\" from the dropdown, then add path $CALLBACK_PATH"
-  ack "  4. Set the email scope — open Permissions and enable openid + email.\n     Without email, login fails with email_not_found."
-  CLIENT_SECRET=""
-  while [ -z "$CLIENT_SECRET" ]; do
-    read -r -s -p "  5. Generate a client secret and paste it here: " CLIENT_SECRET </dev/tty; echo
-  done
-  printf '     \033[1;32m✓ done\033[0m\n\n'
-  CLIENT_ID=""
-  while [ -z "$CLIENT_ID" ]; do
-    read -r -p "  6. Paste the client ID: " CLIENT_ID </dev/tty
-  done
-  printf '     \033[1;32m✓ done\033[0m\n'
-}
 
 # Try to register the app automatically via the OAuth Apps API. The name and
 # slug must be globally unique, so we derive them from the project id. The email
@@ -168,8 +151,7 @@ if [ -n "$CLIENT_ID" ]; then
     done
   fi
 else
-  warn "Automatic OAuth app registration was not available. Falling back to manual setup."
-  manual_oauth
+  warn "OAuth app already registered, skipping"
 fi
 
 set_env NEXT_PUBLIC_VERCEL_APP_CLIENT_ID "$CLIENT_ID" plain '["production","preview","development"]'
