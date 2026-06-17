@@ -8,7 +8,7 @@ import {
   Loader2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -168,85 +168,11 @@ function AssistantTextPart({
   readonly showCaret: boolean;
   readonly text: string;
 }) {
-  const displayedText = useSmoothedStreamingText(text, showCaret);
-
   return (
-    <Markdown caret="block" isAnimating={showCaret || displayedText !== text}>
-      {displayedText}
+    <Markdown caret="block" isAnimating={showCaret}>
+      {text}
     </Markdown>
   );
-}
-
-function useSmoothedStreamingText(text: string, isStreaming: boolean) {
-  const [displayedText, setDisplayedText] = useState(text);
-  const displayedTextRef = useRef(text);
-  const targetTextRef = useRef(text);
-  const frameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    targetTextRef.current = text;
-
-    if (!isStreaming) {
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-
-      displayedTextRef.current = text;
-      setDisplayedText(text);
-      return;
-    }
-
-    if (displayedTextRef.current === text) {
-      setDisplayedText(text);
-      return;
-    }
-
-    if (!text.startsWith(displayedTextRef.current)) {
-      displayedTextRef.current = text;
-      setDisplayedText(text);
-      return;
-    }
-
-    const tick = () => {
-      const current = displayedTextRef.current;
-      const target = targetTextRef.current;
-
-      if (current === target) {
-        frameRef.current = null;
-        return;
-      }
-
-      if (!target.startsWith(current)) {
-        displayedTextRef.current = target;
-        setDisplayedText(target);
-        frameRef.current = null;
-        return;
-      }
-
-      const remaining = target.length - current.length;
-      const nextLength = current.length + Math.max(1, Math.ceil(remaining / 12));
-      const next = target.slice(0, nextLength);
-
-      displayedTextRef.current = next;
-      setDisplayedText(next);
-      frameRef.current = window.requestAnimationFrame(tick);
-    };
-
-    if (frameRef.current === null) {
-      frameRef.current = window.requestAnimationFrame(tick);
-    }
-  }, [isStreaming, text]);
-
-  useEffect(() => {
-    return () => {
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current);
-      }
-    };
-  }, []);
-
-  return displayedText;
 }
 
 function ReasoningPart({
