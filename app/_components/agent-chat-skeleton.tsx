@@ -115,7 +115,7 @@ function ConversationSkeleton() {
         <div className="h-6 w-48 max-w-[50vw] rounded-md bg-muted/35" />
       </div>
       <div className="flex-1 px-4 py-10 sm:px-6">
-        <div className="mx-auto flex w-full max-w-5xl animate-pulse flex-col gap-8">
+        <div className="mx-auto flex w-full max-w-2xl animate-pulse flex-col gap-8">
           <div className="space-y-3">
             <div className="h-4 w-36 rounded-md bg-muted/30" />
             <div className="h-5 w-72 max-w-[70vw] rounded-md bg-muted/45" />

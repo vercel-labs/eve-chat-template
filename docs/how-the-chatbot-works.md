@@ -696,9 +696,12 @@ The current send limits are:
 
 - `chat:create`: 25 per hour
 - `chat:send`: 25 per hour
+- Message length: 8,000 characters
 
 The create and send limits are separate so creating a chat and then sending a
-message can be guarded independently.
+message can be guarded independently. Message length is enforced in the
+composer and again in server actions before creating chats or saving pending
+messages.
 
 ## Message Rendering
 

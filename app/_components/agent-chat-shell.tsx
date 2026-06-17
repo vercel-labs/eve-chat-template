@@ -239,9 +239,47 @@ export function AgentChatShell({
     };
   }, [setBootstrapData]);
 
+  useEffect(() => {
+    const abortController = new AbortController();
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/bootstrap", {
+          signal: abortController.signal,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setHistoryLoading(false);
+          return;
+        }
+
+        const data = (await response.json()) as ChatBootstrapSyncDetail;
+
+        if (!cancelled) {
+          setBootstrapData(data);
+        }
+      } catch {
+        if (!cancelled && !abortController.signal.aborted) {
+          setHistoryLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, [setBootstrapData]);
+
   const contextValue = useMemo(
     () => ({
       activeChatId,
+      desktopSidebarOpen,
       enabledConnections,
       removeChat,
       requestSignIn,
@@ -254,6 +292,7 @@ export function AgentChatShell({
     }),
     [
       activeChatId,
+      desktopSidebarOpen,
       enabledConnections,
       removeChat,
       requestSignIn,

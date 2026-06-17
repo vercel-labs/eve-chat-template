@@ -4,6 +4,7 @@ import { ArrowUpIcon, Loader2Icon, SquareIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   type FormEvent,
   type KeyboardEvent,
@@ -11,6 +12,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { getChatMessageLength, MAX_CHAT_MESSAGE_CHARS } from "@/lib/chat/limits";
 import { cn } from "@/lib/utils";
 
 export function ChatComposer({
@@ -21,6 +23,7 @@ export function ChatComposer({
   footerStart,
   isBusy = false,
   isPreparing = false,
+  maxLength = MAX_CHAT_MESSAGE_CHARS,
   onChange,
   onStop,
   onSubmit,
@@ -34,14 +37,18 @@ export function ChatComposer({
   readonly footerStart?: ReactNode;
   readonly isBusy?: boolean;
   readonly isPreparing?: boolean;
+  readonly maxLength?: number;
   readonly onChange: (value: string) => void;
   readonly onStop: () => void;
   readonly onSubmit: (value: string) => void | Promise<void>;
   readonly placeholder?: string;
   readonly value: string;
 }) {
+  const composerId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const textareaDisabled = disabled || isBusy || isPreparing;
+  const trimmedValue = value.trim();
+  const isOverMaxLength = getChatMessageLength(trimmedValue) > maxLength;
 
   useEffect(() => {
     if (!autoFocus || textareaDisabled) {
@@ -57,12 +64,12 @@ export function ChatComposer({
 
   const submitValue = useCallback(() => {
     const text = value.trim();
-    if (!text || disabled || isBusy || isPreparing) {
+    if (!text || disabled || isBusy || isPreparing || getChatMessageLength(text) > maxLength) {
       return;
     }
 
     void onSubmit(text);
-  }, [disabled, isBusy, isPreparing, onSubmit, value]);
+  }, [disabled, isBusy, isPreparing, maxLength, onSubmit, value]);
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -91,14 +98,16 @@ export function ChatComposer({
       data-chat-composer
       onSubmit={handleSubmit}
     >
-      <label className="sr-only" htmlFor="eve-composer">
+      <label className="sr-only" htmlFor={composerId}>
         Message Eve
       </label>
       <textarea
         autoFocus={autoFocus}
         className="max-h-32 min-h-12 w-full resize-none bg-transparent px-3 pt-3 pb-1 text-[15px] leading-6 outline-none placeholder:text-muted-foreground/45 disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 dark:placeholder:text-muted-foreground/60"
+        data-chat-composer-input
         disabled={textareaDisabled}
-        id="eve-composer"
+        id={composerId}
+        maxLength={maxLength}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
@@ -114,7 +123,7 @@ export function ChatComposer({
           {isBusy ? (
             <Button
               aria-label="Stop response"
-              className="size-6 rounded-md bg-foreground text-background hover:bg-foreground/90"
+              className="size-6 cursor-pointer rounded-md bg-foreground text-background hover:bg-foreground/90"
               onClick={onStop}
               size="icon-xs"
               type="button"
@@ -134,8 +143,8 @@ export function ChatComposer({
           ) : (
             <Button
               aria-label="Send message"
-              className="size-6 rounded-md bg-foreground text-background hover:bg-foreground/90 disabled:opacity-30"
-              disabled={disabled || value.trim().length === 0}
+              className="size-6 cursor-pointer rounded-md bg-foreground text-background hover:bg-foreground/90 disabled:cursor-not-allowed disabled:pointer-events-auto disabled:opacity-30"
+              disabled={disabled || trimmedValue.length === 0 || isOverMaxLength}
               size="icon-xs"
               type="submit"
             >

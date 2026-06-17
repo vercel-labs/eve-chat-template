@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createChatAction } from "@/app/actions/chat";
 import {
   ComposerFooterControls,
@@ -11,6 +11,7 @@ import {
 import { useChatShell } from "@/app/_components/chat-shell-context";
 import { ChatComposer } from "@/components/chat/composer";
 import { TemplateFooterLinks } from "@/components/chat/template-footer-links";
+import { getChatMessageLengthError } from "@/lib/chat/limits";
 import type { SetupStatus } from "@/lib/chat/types";
 
 const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
@@ -31,9 +32,20 @@ export function HomeChatPage() {
   const [submitting, setSubmitting] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const submittingRef = useRef(false);
   const setupReady = setupStatus.appReady;
+  const pathname = usePathname();
   const router = useRouter();
   const toastError = clientError && dismissedError !== clientError ? clientError : null;
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     setActiveChatId(null);
@@ -60,14 +72,24 @@ export function HomeChatPage() {
     async (text: string) => {
       const message = text.trim();
 
-      if (!message || submitting) {
+      if (!message || submittingRef.current) {
         return;
       }
 
       setClientError(null);
 
+      const lengthError = getChatMessageLengthError(message);
+
+      if (lengthError) {
+        setClientError(lengthError);
+        return;
+      }
+
       if (!setupReady) {
-        setClientError(getHomeComposerDisabledReason({ setupStatus, submitting }) ?? "Finish setup before chatting.");
+        setClientError(
+          getHomeComposerDisabledReason({ setupStatus, submitting }) ??
+            "Finish setup before chatting.",
+        );
         return;
       }
 
@@ -76,8 +98,11 @@ export function HomeChatPage() {
         return;
       }
 
+      submittingRef.current = true;
       setSubmitting(true);
       setDraft("");
+
+      let shouldResetSubmitting = true;
 
       try {
         const created = await createChatAction({ pendingUserMessage: message });
@@ -87,10 +112,18 @@ export function HomeChatPage() {
         touchChat(created);
         setActiveChatId(created.id);
         router.replace(chatPath, { scroll: false });
+        shouldResetSubmitting = false;
       } catch (error) {
         setDraft(message);
         setClientError(error instanceof Error ? error.message : "Failed to start chat.");
-        setSubmitting(false);
+      } finally {
+        if (shouldResetSubmitting) {
+          submittingRef.current = false;
+
+          if (mountedRef.current) {
+            setSubmitting(false);
+          }
+        }
       }
     },
     [
@@ -98,6 +131,7 @@ export function HomeChatPage() {
       router,
       setActiveChatId,
       setupReady,
+      setupStatus,
       submitting,
       touchChat,
       viewer,
@@ -109,6 +143,10 @@ export function HomeChatPage() {
     setupStatus,
     submitting,
   });
+
+  if (pathname !== "/") {
+    return null;
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-14 md:pt-8">

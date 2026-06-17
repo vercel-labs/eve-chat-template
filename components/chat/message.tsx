@@ -8,7 +8,7 @@ import {
   Loader2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -48,14 +48,15 @@ export function AgentMessage({
     >
       <div
         className={cn(
-          "min-w-0 text-sm leading-relaxed",
+          "min-w-0",
           isUser
-            ? "max-w-[85%] rounded-2xl border border-border/40 bg-muted/70 px-4 py-1.5 text-foreground shadow-sm"
-            : "w-full max-w-none text-foreground",
+            ? "max-w-[85%] rounded-[18px] border border-border/40 bg-muted/70 px-3 py-1.5 text-[15px] leading-6 text-foreground shadow-sm"
+            : "w-full max-w-none text-sm leading-relaxed text-foreground",
         )}
       >
         <AgentMessageParts
           canRespond={canRespond}
+          isUser={isUser}
           lastTextIndex={lastTextIndex}
           onInputResponses={onInputResponses}
           parts={message.parts}
@@ -68,12 +69,14 @@ export function AgentMessage({
 
 function AgentMessageParts({
   canRespond,
+  isUser,
   lastTextIndex,
   onInputResponses,
   parts,
   showCaret,
 }: {
   readonly canRespond: boolean;
+  readonly isUser: boolean;
   readonly lastTextIndex: number;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly parts: readonly EveMessagePart[];
@@ -111,6 +114,7 @@ function AgentMessageParts({
     elements.push(
       <AgentMessagePart
         canRespond={canRespond}
+        isUser={isUser}
         key={partKey(part, index)}
         onInputResponses={onInputResponses}
         part={part}
@@ -126,11 +130,13 @@ function AgentMessageParts({
 
 function AgentMessagePart({
   canRespond,
+  isUser,
   onInputResponses,
   part,
   showCaret,
 }: {
   readonly canRespond: boolean;
+  readonly isUser: boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
@@ -139,16 +145,108 @@ function AgentMessagePart({
     case "step-start":
       return null;
     case "text":
-      return (
-        <Markdown caret="block" isAnimating={showCaret}>
-          {part.text}
-        </Markdown>
+      return isUser ? (
+        <UserTextPart text={part.text} />
+      ) : (
+        <AssistantTextPart showCaret={showCaret} text={part.text} />
       );
     case "reasoning":
       return <ReasoningPart isStreaming={part.state === "streaming"} text={part.text} />;
     case "dynamic-tool":
       return null;
   }
+}
+
+function UserTextPart({ text }: { readonly text: string }) {
+  return <div className="whitespace-pre-wrap break-words">{text}</div>;
+}
+
+function AssistantTextPart({
+  showCaret,
+  text,
+}: {
+  readonly showCaret: boolean;
+  readonly text: string;
+}) {
+  const displayedText = useSmoothedStreamingText(text, showCaret);
+
+  return (
+    <Markdown caret="block" isAnimating={showCaret || displayedText !== text}>
+      {displayedText}
+    </Markdown>
+  );
+}
+
+function useSmoothedStreamingText(text: string, isStreaming: boolean) {
+  const [displayedText, setDisplayedText] = useState(text);
+  const displayedTextRef = useRef(text);
+  const targetTextRef = useRef(text);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    targetTextRef.current = text;
+
+    if (!isStreaming) {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+
+      displayedTextRef.current = text;
+      setDisplayedText(text);
+      return;
+    }
+
+    if (displayedTextRef.current === text) {
+      setDisplayedText(text);
+      return;
+    }
+
+    if (!text.startsWith(displayedTextRef.current)) {
+      displayedTextRef.current = text;
+      setDisplayedText(text);
+      return;
+    }
+
+    const tick = () => {
+      const current = displayedTextRef.current;
+      const target = targetTextRef.current;
+
+      if (current === target) {
+        frameRef.current = null;
+        return;
+      }
+
+      if (!target.startsWith(current)) {
+        displayedTextRef.current = target;
+        setDisplayedText(target);
+        frameRef.current = null;
+        return;
+      }
+
+      const remaining = target.length - current.length;
+      const nextLength = current.length + Math.max(1, Math.ceil(remaining / 12));
+      const next = target.slice(0, nextLength);
+
+      displayedTextRef.current = next;
+      setDisplayedText(next);
+      frameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    if (frameRef.current === null) {
+      frameRef.current = window.requestAnimationFrame(tick);
+    }
+  }, [isStreaming, text]);
+
+  useEffect(() => {
+    return () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+      }
+    };
+  }, []);
+
+  return displayedText;
 }
 
 function ReasoningPart({
@@ -207,13 +305,13 @@ function ToolGroup({
 
   return (
     <Collapsible
-      className="my-2"
+      className="my-2 px-3"
       onOpenChange={canExpand ? setOpen : undefined}
       open={canExpand ? open : false}
     >
       <CollapsibleTrigger
         className={cn(
-          "group flex max-w-full items-center gap-1.5 py-1 text-left text-xs text-muted-foreground transition-colors",
+          "group flex max-w-full items-center gap-2 py-0.5 text-left text-sm leading-6 text-muted-foreground transition-colors",
           canExpand ? "cursor-pointer hover:text-foreground" : "cursor-default",
         )}
         disabled={!canExpand}
@@ -224,14 +322,14 @@ function ToolGroup({
         {canExpand ? (
           <ChevronRightIcon
             className={cn(
-              "size-3 shrink-0 transition-all",
+              "size-3 shrink-0 self-center transition-all",
               open ? "rotate-90 opacity-100" : "opacity-0 group-hover:opacity-100",
             )}
           />
         ) : null}
       </CollapsibleTrigger>
       {canExpand ? (
-        <CollapsibleContent className="ml-1.5 border-l border-border/40 pl-2 pt-0.5 pb-1">
+        <CollapsibleContent className="ml-2 border-l border-border/40 pl-3 pt-0.5 pb-1">
           {parts.length === 1 ? (
             <ToolDetails
               canRespond={canRespond}
@@ -280,7 +378,7 @@ function ToolCallItem({
   const button = (
     <button
       className={cn(
-        "flex w-full items-center gap-2 py-0.5 text-left text-xs text-muted-foreground transition-colors",
+        "flex w-full items-center gap-2 py-0.5 text-left text-sm leading-6 text-muted-foreground transition-colors",
         canExpand ? "cursor-pointer hover:text-foreground" : "cursor-default",
       )}
       type="button"
@@ -290,7 +388,7 @@ function ToolCallItem({
       <span className="truncate text-foreground/80">{describeToolAction(part, status)}</span>
       {canExpand ? (
         <ChevronRightIcon
-          className={cn("ml-auto size-3 shrink-0 transition-transform", open ? "rotate-90" : "")}
+          className={cn("ml-auto size-3 shrink-0 self-center transition-transform", open ? "rotate-90" : "")}
         />
       ) : null}
     </button>
@@ -345,15 +443,29 @@ function ToolDetails({
 }
 
 function ToolStatusIcon({ status }: { readonly status: ToolStatus }) {
+  const className = "size-3 shrink-0";
+
   if (status === "running") {
-    return <Loader2Icon className="size-3 shrink-0 animate-spin" />;
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center self-center">
+        <Loader2Icon className={cn(className, "animate-spin")} />
+      </span>
+    );
   }
 
   if (status === "error" || status === "denied") {
-    return <XIcon className="size-3 shrink-0 text-destructive" />;
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center self-center">
+        <XIcon className={cn(className, "text-destructive")} />
+      </span>
+    );
   }
 
-  return <CheckIcon className="size-3 shrink-0 text-emerald-500" />;
+  return (
+    <span className="flex size-4 shrink-0 items-center justify-center self-center">
+      <CheckIcon className={cn(className, "text-emerald-500")} />
+    </span>
+  );
 }
 
 function ToolNameLabel({ part }: { readonly part: EveDynamicToolPart }) {
@@ -623,18 +735,17 @@ function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(par
 
   if (normalized.includes("connection") && normalized.includes("search")) {
     const verb = status === "running" ? "Searching" : "Searched";
+    const connectionName = resolveConnectionName(name, connection);
 
-    if (connection && connection !== "*") {
-      return `${verb} ${formatDisplayName(connection)}`;
+    if (connectionName) {
+      return `${verb} ${formatDisplayName(connectionName)}`;
     }
 
-    if (query) {
-      return connection === "*"
-        ? `${verb} connections`
-        : `${verb} ${truncateInline(query, 72)}`;
+    if (query && query !== "*") {
+      return `${verb} ${truncateInline(query, 72)}`;
     }
 
-    return `${verb} ${connection === "*" ? "connections" : "connection"}`;
+    return `${verb} connections`;
   }
 
   if (normalized.includes("search") || normalized.includes("grep")) {
@@ -699,6 +810,28 @@ function formatDisplayName(value: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function resolveConnectionName(toolName: string, inputConnection?: string | null) {
+  if (inputConnection && inputConnection !== "*") {
+    return inputConnection;
+  }
+
+  const tokens = normalizeToolName(toolName).split(/\s+/).filter(Boolean);
+
+  if (tokens[0] !== "connection" || tokens.length <= 2) {
+    return null;
+  }
+
+  const connectionTokens = tokens
+    .slice(1)
+    .filter((token) => token !== "search" && token !== "tool" && token !== "tools");
+
+  if (connectionTokens.length === 0) {
+    return null;
+  }
+
+  return [...new Set(connectionTokens)].join(" ");
 }
 
 function shortenPath(filepath: string) {

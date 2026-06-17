@@ -30,9 +30,9 @@ export function SignInModal({
           <div className="mb-2 flex size-10 items-center justify-center rounded-full border border-border bg-muted">
             <VercelIcon className="size-4 text-foreground" />
           </div>
-          <DialogTitle>Sign in to get started</DialogTitle>
+          <DialogTitle>Sign up or in to get started</DialogTitle>
           <DialogDescription>
-            Connect your Vercel account to save chats and resume Eve sessions.
+            Connect your Vercel account to send messages and save sessions.
           </DialogDescription>
         </DialogHeader>
         <SignInButton

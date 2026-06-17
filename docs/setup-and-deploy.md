@@ -112,6 +112,8 @@ email
 profile
 ```
 
+In the Vercel App dashboard UI, open the app's scopes/permissions settings and toggle all three scopes on. These are Vercel App permissions, not environment variables.
+
 The email scope is mandatory. Without it, Better Auth redirects to:
 
 ```text

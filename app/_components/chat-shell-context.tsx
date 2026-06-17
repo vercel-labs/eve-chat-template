@@ -9,6 +9,7 @@ export type EnabledConnections = {
 
 type ChatShellContextValue = {
   readonly activeChatId: string | null;
+  readonly desktopSidebarOpen: boolean;
   readonly enabledConnections: EnabledConnections;
   readonly removeChat: (chatId: string) => void;
   readonly requestSignIn: (draft?: string) => void;

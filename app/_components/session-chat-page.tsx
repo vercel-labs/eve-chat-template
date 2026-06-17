@@ -98,6 +98,57 @@ export function SessionChatPage({
   }, [chatId]);
 
   useEffect(() => {
+    if (!viewer || !setupStatus.appReady) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
+          signal: abortController.signal,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setClientError(
+            response.status === 404
+              ? "Chat not found."
+              : "Failed to load chat history.",
+          );
+          return;
+        }
+
+        const data = (await response.json()) as { readonly chat: ActiveChat | null };
+
+        if (cancelled) {
+          return;
+        }
+
+        setActiveChat(data.chat);
+        setPendingUserMessage(data.chat?.pendingUserMessage ?? null);
+        setClientError(null);
+      } catch (error) {
+        if (!cancelled && !abortController.signal.aborted) {
+          setClientError(
+            error instanceof Error ? error.message : "Failed to load chat history.",
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, [chatId, setupStatus.appReady, viewer]);
+
+  useEffect(() => {
     if (!viewer) {
       return;
     }
@@ -195,12 +246,21 @@ export function SessionChatPage({
     setPendingUserMessage(null);
   }, []);
 
-  const sessionKey = activeChat ? `${chatId}:loaded` : `${chatId}:blank`;
+  const handleActiveChatUpdated = useCallback((nextActiveChat: ActiveChat) => {
+    setActiveChat(nextActiveChat);
+    setPendingUserMessage(nextActiveChat.pendingUserMessage);
+  }, []);
+
   const composerDisabled =
-    !setupStatus.appReady || isLoadingChat || controllerStatus.isDisabled;
+    !setupStatus.appReady ||
+    isLoadingChat ||
+    Boolean(pendingUserMessage) ||
+    controllerStatus.isDisabled;
+  const sessionInstanceKey = activeChat ? `${chatId}:loaded` : `${chatId}:loading`;
   const composerDisabledReason = getSessionComposerDisabledReason({
     controllerStatus,
     isLoadingChat,
+    pendingUserMessage,
     setupStatus,
   });
 
@@ -217,7 +277,8 @@ export function SessionChatPage({
         activeChat={activeChat}
         chatId={chatId}
         isLoadingChat={isLoadingChat}
-        key={sessionKey}
+        key={sessionInstanceKey}
+        onActiveChatUpdated={handleActiveChatUpdated}
         onPendingUserMessageSettled={handlePendingUserMessageSettled}
         onControllerChange={handleControllerChange}
         pendingUserMessage={pendingUserMessage}
@@ -249,10 +310,12 @@ export function SessionChatPage({
 function getSessionComposerDisabledReason({
   controllerStatus,
   isLoadingChat,
+  pendingUserMessage,
   setupStatus,
 }: {
   readonly controllerStatus: AgentChatControllerStatus;
   readonly isLoadingChat: boolean;
+  readonly pendingUserMessage: string | null;
   readonly setupStatus: SetupStatus;
 }) {
   if (!setupStatus.databaseConfigured) {
@@ -265,6 +328,10 @@ function getSessionComposerDisabledReason({
 
   if (controllerStatus.disabledReason) {
     return controllerStatus.disabledReason;
+  }
+
+  if (pendingUserMessage) {
+    return "Sending message.";
   }
 
   if (isLoadingChat) {
