@@ -15,7 +15,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const STREAM_TEXT_TICK_MS = 36;
+const STREAM_TEXT_TICK_MS = 42;
 
 export type AgentInputResponse = {
   readonly optionId?: string;
