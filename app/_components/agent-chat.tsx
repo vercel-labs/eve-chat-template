@@ -682,7 +682,7 @@ export function AgentChatSession({
   readonly emptyComposer?: ReactNode;
   readonly isLoadingChat?: boolean;
   readonly onActiveChatUpdated?: (activeChat: ActiveChat) => void;
-  readonly onPendingUserMessageSettled?: () => void;
+  readonly onPendingUserMessageSettled?: (message?: string) => void;
   readonly onControllerChange: (
     controller: AgentChatController | null,
     status: AgentChatControllerStatus,
@@ -811,11 +811,21 @@ export function AgentChatSession({
         });
         eventIndexRef.current = events.length;
         knownInitialEventsRef.current = events;
+        streamEventsRef.current = [];
+        setStreamEvents([]);
         touchChat({
           id: chatId,
           title: currentTitleRef.current,
           updatedAt: new Date().toISOString(),
         });
+        onActiveChatUpdated?.({
+          events,
+          id: chatId,
+          pendingUserMessage: null,
+          session,
+          title: currentTitleRef.current,
+        });
+        onPendingUserMessageSettled?.();
 
       } catch (error) {
         setClientError(error instanceof Error ? error.message : "Failed to save chat.");
@@ -823,7 +833,14 @@ export function AgentChatSession({
         finishFinalizingTurn();
       }
     },
-    [finishFinalizingTurn, stopFinalizingTurn, touchChat, viewer],
+    [
+      finishFinalizingTurn,
+      onActiveChatUpdated,
+      onPendingUserMessageSettled,
+      stopFinalizingTurn,
+      touchChat,
+      viewer,
+    ],
   );
 
   const persistStreamEvent = useCallback(
@@ -901,7 +918,7 @@ export function AgentChatSession({
     },
   });
 
-  const hasResumeOverlay = isResuming || resumedEvents.length > 0;
+  const hasResumeOverlay = isResuming || (resumedEvents.length > 0 && streamEvents.length === 0);
   const resumedEventLog = useMemo(
     () => [...(activeChat?.events ?? []), ...resumedEvents],
     [activeChat?.events, resumedEvents],
@@ -1083,7 +1100,11 @@ export function AgentChatSession({
         return;
       }
 
+      resumedEventsRef.current = [];
+      setResumedEvents([]);
+      setIsResuming(false);
       showLocalPendingMessage();
+      onPendingUserMessageSettled?.(message);
 
       try {
         const updated = await markChatPendingMessageAction({
@@ -1126,6 +1147,7 @@ export function AgentChatSession({
       setLocalPendingUserMessage,
       startFinalizingTurn,
       stopFinalizingTurn,
+      onPendingUserMessageSettled,
       touchChat,
       viewer,
     ],
@@ -1393,10 +1415,20 @@ export function AgentChatSession({
           session: session.state,
         });
         eventIndexRef.current = allEvents.length;
+        knownInitialEventsRef.current = allEvents;
+        resumedEventsRef.current = [];
+        setResumedEvents([]);
         touchChat({
           id: activeChat.id,
           title: currentTitleRef.current,
           updatedAt: new Date().toISOString(),
+        });
+        onActiveChatUpdated?.({
+          events: allEvents,
+          id: activeChat.id,
+          pendingUserMessage: null,
+          session: session.state,
+          title: currentTitleRef.current,
         });
 
         onPendingUserMessageSettled?.();
@@ -1420,6 +1452,7 @@ export function AgentChatSession({
     activeChat?.id,
     activeChat?.session,
     agent.status,
+    onActiveChatUpdated,
     onPendingUserMessageSettled,
     pendingUserMessage,
     persistSessionState,
@@ -1449,7 +1482,7 @@ export function AgentChatSession({
       pendingUserMessage &&
       hasLatestUserMessage(displayMessages, pendingUserMessage)
     ) {
-      onPendingUserMessageSettled?.();
+      onPendingUserMessageSettled?.(pendingUserMessage);
     }
   }, [
     displayMessages,

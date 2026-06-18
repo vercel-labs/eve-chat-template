@@ -39,6 +39,7 @@ export function SessionChatPage({
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const controllerRef = useRef<AgentChatController | null>(null);
   const pendingConsumedRef = useRef(false);
+  const settledPendingMessagesRef = useRef(new Set<string>());
   const toastError = clientError && dismissedError !== clientError ? clientError : null;
   const isLoadingChat = !activeChat;
 
@@ -50,6 +51,7 @@ export function SessionChatPage({
     setDraft("");
     setPendingUserMessage(null);
     pendingConsumedRef.current = false;
+    settledPendingMessagesRef.current = new Set();
   }, [chatId]);
 
   useEffect(() => {
@@ -74,7 +76,10 @@ export function SessionChatPage({
       });
       setPendingUserMessage((current) => {
         if (detail.activeChat) {
-          return detail.activeChat.pendingUserMessage ?? null;
+          return getRestorablePendingUserMessage(
+            detail.activeChat.pendingUserMessage,
+            settledPendingMessagesRef.current,
+          );
         }
 
         return current;
@@ -131,7 +136,12 @@ export function SessionChatPage({
         }
 
         setActiveChat(data.chat);
-        setPendingUserMessage(data.chat?.pendingUserMessage ?? null);
+        setPendingUserMessage(
+          getRestorablePendingUserMessage(
+            data.chat?.pendingUserMessage ?? null,
+            settledPendingMessagesRef.current,
+          ),
+        );
         setClientError(null);
       } catch (error) {
         if (!cancelled && !abortController.signal.aborted) {
@@ -242,13 +252,24 @@ export function SessionChatPage({
     controllerRef.current?.stop();
   }, []);
 
-  const handlePendingUserMessageSettled = useCallback(() => {
-    setPendingUserMessage(null);
+  const handlePendingUserMessageSettled = useCallback((message?: string) => {
+    if (message) {
+      settledPendingMessagesRef.current.add(message);
+    }
+
+    setPendingUserMessage((current) =>
+      !message || current === message ? null : current,
+    );
   }, []);
 
   const handleActiveChatUpdated = useCallback((nextActiveChat: ActiveChat) => {
     setActiveChat(nextActiveChat);
-    setPendingUserMessage(nextActiveChat.pendingUserMessage);
+    setPendingUserMessage(
+      getRestorablePendingUserMessage(
+        nextActiveChat.pendingUserMessage,
+        settledPendingMessagesRef.current,
+      ),
+    );
   }, []);
 
   const composerDisabled =
@@ -305,6 +326,17 @@ export function SessionChatPage({
       </div>
     </div>
   );
+}
+
+function getRestorablePendingUserMessage(
+  pendingUserMessage: string | null | undefined,
+  settledMessages: ReadonlySet<string>,
+) {
+  if (!pendingUserMessage || settledMessages.has(pendingUserMessage)) {
+    return null;
+  }
+
+  return pendingUserMessage;
 }
 
 function getSessionComposerDisabledReason({
