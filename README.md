@@ -1,4 +1,4 @@
-# rve Chat Template
+# eve Chat Template
 
 A persisted Next.js chat template for [rve](https://beta.eve.dev), built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.
 
