@@ -1,5 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "pnpm install --no-lockfile",
+  "buildCommand": "pnpm run build",
   "experimentalServices": {
     "web": {
       "entrypoint": ".",

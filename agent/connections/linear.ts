@@ -1,4 +1,4 @@
-import { connect } from "@vercel/connect/eve";
+import { connectAuth } from "../lib/connect-auth";
 import { defineMcpClientConnection } from "eve/connections";
 
 // LINEAR_CONNECTOR is the UID returned by Vercel Connect. For local setup,
@@ -9,5 +9,5 @@ export default defineMcpClientConnection({
   url: "https://mcp.linear.app/mcp",
   description:
     "Linear workspace: search and update issues, projects, cycles, comments, and planning work.",
-  auth: connect(linearConnector),
+  auth: connectAuth(linearConnector),
 });
