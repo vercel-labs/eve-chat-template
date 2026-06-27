@@ -14,6 +14,7 @@
     "db:migrate:production": "vercel env run -e production -- pnpm db:migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "env:validate": "node scripts/validate-env.mjs",
     "dev": "next dev",
     "start": "next start",
     "typecheck": "next typegen && tsgo --noEmit -p tsconfig.json",
