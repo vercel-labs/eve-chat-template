@@ -4,7 +4,7 @@ import type { HandleMessageStreamEvent, SessionState } from "eve/client";
 import { isChatTurnSettledEvent } from "@/lib/chat/events";
 import type { ActiveChat, ChatListItem, ChatListPage } from "@/lib/chat/types";
 import { createFallbackTitle, DEFAULT_CHAT_TITLE } from "@/lib/chat/title";
-import { chat, chatEvent } from "@/lib/db/schema";
+import { attachment, chat, chatEvent } from "@/lib/db/schema";
 import { db } from "@/lib/db/client";
 
 const CHAT_HISTORY_PAGE_SIZE = 20;
@@ -148,14 +148,32 @@ export async function getChatForUser(chatId: string, userId: string): Promise<Ac
         isChatTurnSettledEvent(eventRow.event),
     ),
   );
+  const attachments = await getAttachmentsForChat(chatId);
 
   return {
+    attachments,
     events: eventValues,
     id: row.id,
     pendingUserMessage: hasCurrentTurnCompleted ? null : row.pendingUserMessage,
     session: row.eveSession ?? undefined,
     title: row.title,
   };
+}
+
+export async function getAttachmentsForChat(chatId: string) {
+  const rows = await db
+    .select({
+      id: attachment.id,
+      filename: attachment.filename,
+      mediaType: attachment.mediaType,
+      size: attachment.size,
+      url: attachment.url,
+    })
+    .from(attachment)
+    .where(eq(attachment.chatId, chatId))
+    .orderBy(asc(attachment.createdAt));
+
+  return rows;
 }
 
 export async function markChatPendingMessage({

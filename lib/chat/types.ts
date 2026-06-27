@@ -18,7 +18,16 @@ export type ChatListPage = {
   readonly nextCursor: string | null;
 };
 
+export type Attachment = {
+  readonly id: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly url: string;
+};
+
 export type ActiveChat = {
+  readonly attachments: readonly Attachment[];
   readonly events: readonly HandleMessageStreamEvent[];
   readonly id: string;
   readonly pendingUserMessage: string | null;

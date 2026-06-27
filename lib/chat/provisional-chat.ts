@@ -2,10 +2,17 @@ const PENDING_CHAT_STORAGE_MAX_AGE_MS = 10 * 60 * 1000;
 const PENDING_CHAT_STORAGE_PREFIX = "eve-chat-pending:";
 const PROVISIONAL_CHAT_ID_PREFIX = "new-";
 
+type StoredPendingAttachment = {
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly url: string;
+};
+
 type StoredPendingChat = {
+  readonly attachments: readonly StoredPendingAttachment[];
   readonly createdAt: number;
   readonly pendingUserMessage: string;
-  readonly version: 1;
+  readonly version: 2;
 };
 
 export function createProvisionalChatId() {
@@ -20,10 +27,14 @@ export function isProvisionalChatId(chatId: string) {
   return chatId.startsWith(PROVISIONAL_CHAT_ID_PREFIX);
 }
 
-export function writePendingChatMessage(chatId: string, message: string) {
+export function writePendingChatMessage(
+  chatId: string,
+  message: string,
+  attachments: readonly StoredPendingAttachment[] = [],
+) {
   const pendingUserMessage = message.trim();
 
-  if (!pendingUserMessage || typeof window === "undefined") {
+  if ((!pendingUserMessage && attachments.length === 0) || typeof window === "undefined") {
     return false;
   }
 
@@ -31,9 +42,10 @@ export function writePendingChatMessage(chatId: string, message: string) {
     window.sessionStorage.setItem(
       getPendingChatStorageKey(chatId),
       JSON.stringify({
+        attachments,
         createdAt: Date.now(),
         pendingUserMessage,
-        version: 1,
+        version: 2,
       } satisfies StoredPendingChat),
     );
     return true;
@@ -43,6 +55,19 @@ export function writePendingChatMessage(chatId: string, message: string) {
 }
 
 export function readPendingChatMessage(chatId: string) {
+  return readPendingChat(chatId)?.pendingUserMessage ?? null;
+}
+
+export function readPendingChatAttachments(chatId: string): readonly StoredPendingAttachment[] {
+  return readPendingChat(chatId)?.attachments ?? [];
+}
+
+type PendingChat = {
+  readonly attachments: readonly StoredPendingAttachment[];
+  readonly pendingUserMessage: string | null;
+};
+
+export function readPendingChat(chatId: string): PendingChat | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -58,9 +83,10 @@ export function readPendingChatMessage(chatId: string) {
     const parsed = JSON.parse(stored) as Partial<StoredPendingChat>;
     const createdAt = Number(parsed.createdAt);
     const pendingUserMessage = parsed.pendingUserMessage?.trim();
+    const attachments = Array.isArray(parsed.attachments) ? parsed.attachments : [];
 
     if (
-      !pendingUserMessage ||
+      (!pendingUserMessage && attachments.length === 0) ||
       !Number.isFinite(createdAt) ||
       Date.now() - createdAt > PENDING_CHAT_STORAGE_MAX_AGE_MS
     ) {
@@ -68,7 +94,15 @@ export function readPendingChatMessage(chatId: string) {
       return null;
     }
 
-    return pendingUserMessage;
+    return {
+      attachments: attachments.filter(
+        (attachment): attachment is StoredPendingAttachment =>
+          typeof attachment.filename === "string" &&
+          typeof attachment.mediaType === "string" &&
+          typeof attachment.url === "string",
+      ),
+      pendingUserMessage: pendingUserMessage || null,
+    };
   } catch {
     window.sessionStorage.removeItem(key);
     return null;

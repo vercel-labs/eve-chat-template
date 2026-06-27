@@ -16,9 +16,11 @@ import {
 } from "@/app/_components/agent-chat-events";
 import { useChatShell } from "@/app/_components/chat-shell-context";
 import { ChatComposer } from "@/components/chat/composer";
+import type { PendingAttachment } from "@/components/chat/attachments";
 import {
   clearPendingChatMessage,
   isProvisionalChatId,
+  readPendingChatAttachments,
   readPendingChatMessage,
   writePendingChatMessage,
 } from "@/lib/chat/provisional-chat";
@@ -40,6 +42,11 @@ export function SessionChatPage({
   const { setActiveChatId, setupStatus, touchChat, viewer } = useChatShell();
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachmentsState] = useState<PendingAttachment[]>([]);
+  const setAttachments = useCallback(
+    (next: readonly PendingAttachment[]) => setAttachmentsState(next as PendingAttachment[]),
+    [],
+  );
   const [controllerReady, setControllerReady] = useState(false);
   const [controllerStatus, setControllerStatus] = useState(IDLE_CONTROLLER_STATUS);
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
@@ -65,6 +72,7 @@ export function SessionChatPage({
     setControllerStatus(IDLE_CONTROLLER_STATUS);
     setActiveChat(null);
     setDraft("");
+    setAttachments([]);
     setPendingUserMessage(null);
     pendingConsumedRef.current = false;
     settledPendingMessagesRef.current = new Set();
@@ -283,13 +291,37 @@ export function SessionChatPage({
 
     pendingConsumedRef.current = true;
 
-    void controller.sendMessage(pendingUserMessage, {
-      clearDraft: () => setDraft(""),
-      restoreDraft: (value) => {
-        setPendingUserMessage(null);
-        setDraft(value);
+    const pendingAttachments = readPendingChatAttachments(chatId);
+
+    void controller.sendMessage(
+      pendingUserMessage,
+      {
+        clearDraft: () => {
+          setDraft("");
+          setAttachments([]);
+        },
+        restoreDraft: (value) => {
+          setPendingUserMessage(null);
+          setDraft(value);
+          setAttachments(
+            pendingAttachments.map((attachment) => ({
+              filename: attachment.filename,
+              id: attachment.url,
+              mediaType: attachment.mediaType,
+              type: "uploaded" as const,
+              url: attachment.url,
+            })),
+          );
+        },
       },
-    });
+      pendingAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        id: attachment.url,
+        mediaType: attachment.mediaType,
+        type: "uploaded" as const,
+        url: attachment.url,
+      })),
+    );
   }, [
     chatId,
     controllerReady,
@@ -318,24 +350,42 @@ export function SessionChatPage({
     [],
   );
 
-  const handleComposerSubmit = useCallback(async (text: string) => {
-    if (isLoadingChat) {
-      setClientError("Chat history is still loading.");
-      return;
-    }
+  const handleComposerSubmit = useCallback(
+    async ({ attachments: submitAttachments, text }: { readonly attachments: readonly PendingAttachment[]; readonly text: string }) => {
+      if (isLoadingChat) {
+        setClientError("Chat history is still loading.");
+        return;
+      }
 
-    const controller = controllerRef.current;
+      const controller = controllerRef.current;
 
-    if (!controller) {
-      setClientError("Chat is still getting ready.");
-      return;
-    }
+      if (!controller) {
+        setClientError("Chat is still getting ready.");
+        return;
+      }
 
-    await controller.sendMessage(text, {
-      clearDraft: () => setDraft(""),
-      restoreDraft: setDraft,
-    });
-  }, [isLoadingChat]);
+      await controller.sendMessage(
+        text,
+        {
+          clearAttachments: () => setAttachments([]),
+          clearDraft: () => setDraft(""),
+          restoreAttachments: (restored) =>
+            setAttachments(
+              restored.map((attachment) => ({
+                filename: attachment.filename,
+                id: attachment.id,
+                mediaType: attachment.mediaType,
+                type: "uploaded" as const,
+                url: attachment.url,
+              })),
+            ),
+          restoreDraft: setDraft,
+        },
+        submitAttachments,
+      );
+    },
+    [isLoadingChat],
+  );
 
   const handleComposerStop = useCallback(() => {
     controllerRef.current?.stop();
@@ -398,10 +448,12 @@ export function SessionChatPage({
       <div className="shrink-0 pb-4 sm:pb-6">
         <div className="mx-auto w-full max-w-2xl px-4 sm:px-6">
           <ChatComposer
+            attachments={attachments}
             disabled={composerDisabled}
             disabledReason={composerDisabledReason}
             footerStart={<ComposerFooterControls setupStatus={setupStatus} />}
             isBusy={controllerStatus.isBusy}
+            onAttachmentsChange={setAttachments}
             onChange={setDraft}
             onStop={handleComposerStop}
             onSubmit={handleComposerSubmit}

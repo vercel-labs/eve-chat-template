@@ -16,11 +16,13 @@ import {
   ChevronDownIcon,
   ExternalLinkIcon,
   LockIcon,
+  PaperclipIcon,
   PlugIcon,
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { uploadAttachment } from "@/app/actions/attachments";
 import {
   checkSendLimitAction,
   appendChatEventAction,
@@ -31,6 +33,7 @@ import {
   saveChatSessionStateAction,
   skipChatAuthorizationAction,
 } from "@/app/actions/chat";
+import type { PendingAttachment } from "@/components/chat/attachments";
 import {
   useChatShell,
   type EnabledConnections,
@@ -40,6 +43,7 @@ import {
   ChatConversationContent,
   ChatScrollButton,
 } from "@/components/chat/conversation";
+import { UploadedAttachmentList } from "@/components/chat/attachments";
 import { IntegrationsMenu } from "@/components/chat/integrations-menu";
 import { AgentMessage } from "@/components/chat/message";
 import { Button } from "@/components/ui/button";
@@ -63,12 +67,18 @@ type StreamSessionOptions = {
 
 export type DraftHandlers = {
   readonly clearDraft: () => void;
+  readonly clearAttachments?: () => void;
+  readonly restoreAttachments?: (attachments: readonly PendingAttachmentMetadata[]) => void;
   readonly restoreDraft: (value: string) => void;
 };
 
 export type AgentChatController = {
   readonly reset: () => void;
-  readonly sendMessage: (text: string, draftHandlers: DraftHandlers) => Promise<void>;
+  readonly sendMessage: (
+    text: string,
+    draftHandlers: DraftHandlers,
+    attachments?: readonly PendingAttachment[],
+  ) => Promise<void>;
   readonly stop: () => void;
 };
 
@@ -195,6 +205,35 @@ function createInitialSessionState(): SessionState {
 
 function normalizeSendInput(input: SendTurnInput) {
   return typeof input === "string" ? { message: input } : input;
+}
+
+type MessagePart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly data: URL; readonly mediaType: string; readonly type: "file" };
+
+function buildMessageWithAttachments(
+  text: string,
+  attachments: readonly { readonly filename: string; readonly mediaType: string; readonly url: string }[],
+): string | MessagePart[] {
+  if (attachments.length === 0) {
+    return text;
+  }
+
+  const parts: MessagePart[] = [];
+
+  if (text.trim()) {
+    parts.push({ type: "text", text });
+  }
+
+  for (const attachment of attachments) {
+    parts.push({
+      type: "file",
+      data: new URL(attachment.url),
+      mediaType: attachment.mediaType,
+    });
+  }
+
+  return parts as unknown as string | MessagePart[];
 }
 
 async function postSessionTurn(
@@ -696,6 +735,7 @@ export function AgentChatSession({
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
   const [streamEvents, setStreamEvents] = useState<HandleMessageStreamEvent[]>([]);
   const [localEvents, setLocalEvents] = useState<HandleMessageStreamEvent[]>([]);
+  const [sessionAttachments, setSessionAttachments] = useState<PendingAttachmentMetadata[]>([]);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
@@ -807,6 +847,7 @@ export function AgentChatSession({
           updatedAt: new Date().toISOString(),
         });
         onActiveChatUpdated?.({
+          attachments: activeChat?.attachments ?? [],
           events,
           id: chatId,
           pendingUserMessage: null,
@@ -1016,18 +1057,25 @@ export function AgentChatSession({
   );
 
   const sendMessage = useCallback(
-    async (text: string, draftHandlers: DraftHandlers) => {
+    async (
+      text: string,
+      draftHandlers: DraftHandlers,
+      pendingAttachments: readonly PendingAttachment[] = [],
+    ) => {
       const message = text.trim();
+      const hasContent = message || pendingAttachments.length > 0;
 
-      if (!message || isTurnBlocked || localPendingUserMessageRef.current) {
+      if (!hasContent || isTurnBlocked || localPendingUserMessageRef.current) {
         return;
       }
 
-      const lengthError = getChatMessageLengthError(message);
+      if (message) {
+        const lengthError = getChatMessageLengthError(message);
 
-      if (lengthError) {
-        setClientError(lengthError);
-        return;
+        if (lengthError) {
+          setClientError(lengthError);
+          return;
+        }
       }
 
       if (isWaitingForAuthorization) {
@@ -1039,6 +1087,7 @@ export function AgentChatSession({
       const showLocalPendingMessage = () => {
         setLocalPendingUserMessage(message);
         draftHandlers.clearDraft();
+        draftHandlers.clearAttachments?.();
       };
       const restoreAfterFailedSend = (errorMessage?: string) => {
         clearLocalPendingUserMessage();
@@ -1094,6 +1143,42 @@ export function AgentChatSession({
         return;
       }
 
+      let uploadedAttachments: { readonly filename: string; readonly mediaType: string; readonly url: string }[] = [];
+
+      if (pendingAttachments.length > 0) {
+        try {
+          const uploads = await Promise.all(
+            pendingAttachments.map((pending) => {
+              if (pending.type === "uploaded") {
+                return {
+                  filename: pending.filename,
+                  mediaType: pending.mediaType,
+                  url: pending.url,
+                };
+              }
+
+              return uploadAttachment({ chatId, file: pending.file });
+            }),
+          );
+          uploadedAttachments = uploads;
+          setSessionAttachments((current) => [
+            ...current,
+            ...uploads.map((upload) => ({
+              filename: upload.filename,
+              id: upload.url,
+              mediaType: upload.mediaType,
+              size: 0,
+              url: upload.url,
+            })),
+          ]);
+        } catch (error) {
+          restoreAfterFailedSend(
+            error instanceof Error ? error.message : "Failed to upload attachments.",
+          );
+          return;
+        }
+      }
+
       try {
         const updated = await markChatPendingMessageAction({
           chatId,
@@ -1111,7 +1196,7 @@ export function AgentChatSession({
         startFinalizingTurn();
         await agent.send({
           clientContext: createConnectionClientContext(enabledConnections),
-          message,
+          message: buildMessageWithAttachments(message, uploadedAttachments),
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -1241,6 +1326,7 @@ export function AgentChatSession({
         setLocalEvents([]);
         touchChat(result.chat);
         onActiveChatUpdated?.({
+          attachments: activeChat?.attachments ?? [],
           events: skippedEvents,
           id: chatId,
           pendingUserMessage: null,
@@ -1299,6 +1385,15 @@ export function AgentChatSession({
       localEventsRef.current = [];
       setStreamEvents([]);
       setLocalEvents([]);
+      setSessionAttachments(
+        activeChat?.attachments.map((attachment) => ({
+          filename: attachment.filename,
+          id: attachment.id,
+          mediaType: attachment.mediaType,
+          size: attachment.size,
+          url: attachment.url,
+        })) ?? [],
+      );
       stopFinalizingTurn();
       clearLocalPendingUserMessage();
     } else if (!isTurnBlocked) {
@@ -1421,6 +1516,7 @@ export function AgentChatSession({
           updatedAt: new Date().toISOString(),
         });
         onActiveChatUpdated?.({
+          attachments: activeChat.attachments,
           events: allEvents,
           id: activeChat.id,
           pendingUserMessage: null,
@@ -1532,6 +1628,27 @@ export function AgentChatSession({
           ) : (
             <ChatConversation>
               <ChatConversationContent>
+                {(() => {
+                  const allAttachments = [
+                    ...(activeChat?.attachments ?? []),
+                    ...sessionAttachments,
+                  ];
+                  const seen = new Set<string>();
+                  const uniqueAttachments = allAttachments.filter((attachment) => {
+                    if (seen.has(attachment.url)) {
+                      return false;
+                    }
+                    seen.add(attachment.url);
+                    return true;
+                  });
+
+                  return uniqueAttachments.length > 0 ? (
+                    <UploadedAttachmentList
+                      attachments={uniqueAttachments}
+                      className="pb-2"
+                    />
+                  ) : null;
+                })()}
                 {visibleMessages.map((message, index) => (
                   <AgentMessage
                     canRespond={
@@ -1911,6 +2028,14 @@ function appendPendingUserMessages(
 
   return nextMessages;
 }
+
+type PendingAttachmentMetadata = {
+  readonly filename: string;
+  readonly id: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly url: string;
+};
 
 function createPendingUserMessage(
   chatId: string,

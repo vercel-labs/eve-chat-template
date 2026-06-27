@@ -15,6 +15,13 @@
       "when": 1781635077631,
       "tag": "0001_tidy_hitman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782597866729,
+      "tag": "0002_colossal_polaris",
+      "breakpoints": true
     }
   ]
 }

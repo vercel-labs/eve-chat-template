@@ -98,6 +98,25 @@ export const chatEvent = pgTable(
   ],
 );
 
+export const attachment = pgTable(
+  "attachment",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chat.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    mediaType: text("media_type").notNull(),
+    size: integer("size").notNull(),
+    url: text("url").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_attachment_chat").on(table.chatId),
+  ],
+);
+
 export type Chat = typeof chat.$inferSelect;
 export type ChatEvent = typeof chatEvent.$inferSelect;
 export type User = typeof user.$inferSelect;
+export type Attachment = typeof attachment.$inferSelect;

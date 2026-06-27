@@ -28,6 +28,7 @@ One-time setup for the team to run the eve chat template locally.
    ```bash
    vercel integration add neon
    vercel integration add upstash
+   vercel integration add blob
    ```
 
 4. **Pull environment variables**
@@ -67,6 +68,7 @@ See `.env.example` for the full list. At minimum:
 - `VERCEL_APP_CLIENT_SECRET`
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
+- `BLOB_READ_WRITE_TOKEN` (for file uploads — provision Vercel Blob)
 
 ## Optional integrations
 
