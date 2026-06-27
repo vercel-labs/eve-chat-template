@@ -74,6 +74,7 @@ export type DraftHandlers = {
 
 export type AgentChatController = {
   readonly reset: () => void;
+  readonly retry: () => void;
   readonly sendMessage: (
     text: string,
     draftHandlers: DraftHandlers,
@@ -746,6 +747,7 @@ export function AgentChatSession({
   const activeChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
   const eventIndexRef = useRef(activeChat?.events.length ?? 0);
   const eventIndexChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
+  const lastUserMessageRef = useRef<{ readonly text: string; readonly attachments: readonly PendingAttachment[] } | null>(null);
   const knownInitialEventsRef = useRef<readonly HandleMessageStreamEvent[]>(
     activeChat?.events ?? [],
   );
@@ -1086,6 +1088,7 @@ export function AgentChatSession({
 
       const showLocalPendingMessage = () => {
         setLocalPendingUserMessage(message);
+        lastUserMessageRef.current = { attachments: pendingAttachments, text: message };
         draftHandlers.clearDraft();
         draftHandlers.clearAttachments?.();
       };
@@ -1574,10 +1577,21 @@ export function AgentChatSession({
     }
   }, [clearLocalPendingUserMessage, displayMessages, localPendingUserMessage]);
 
+  const retry = useCallback(() => {
+    const last = lastUserMessageRef.current;
+
+    if (!last || isTurnBlocked || localPendingUserMessageRef.current) {
+      return;
+    }
+
+    void sendMessage(last.text, { clearDraft: () => {}, restoreDraft: () => {} }, last.attachments);
+  }, [isTurnBlocked, localPendingUserMessageRef, sendMessage]);
+
   useEffect(() => {
     onControllerChange(
       {
         reset: resetSession,
+        retry,
         sendMessage,
         stop: agent.stop,
       },
@@ -1598,14 +1612,36 @@ export function AgentChatSession({
     isWaitingForAuthorization,
     onControllerChange,
     resetSession,
+    retry,
     sendMessage,
   ]);
 
   useEffect(() => {
-    return () => {
-      onControllerChange(null, IDLE_CONTROLLER_STATUS);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA" || event.target.isContentEditable)) {
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        setShellActiveChatId(null);
+        router.push("/");
+        return;
+      }
+
+      if (event.key === "/") {
+        event.preventDefault();
+        const input = document.querySelector<HTMLTextAreaElement>("[data-chat-composer-input]");
+        input?.focus();
+      }
     };
-  }, [onControllerChange]);
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onControllerChange, router, setShellActiveChatId]);
 
   return (
     <>
@@ -1657,12 +1693,14 @@ export function AgentChatSession({
                       Boolean(viewer) &&
                       isSetupReady
                     }
+                    isLast={index === visibleMessages.length - 1 && message.role === "assistant"}
                     isStreaming={
                       agent.status === "streaming" && index === visibleMessages.length - 1
                     }
                     key={message.id}
                     message={message}
                     onInputResponses={handleInputResponses}
+                    onRetry={message.role === "assistant" ? retry : undefined}
                   />
                 ))}
                 {pendingAuthorizations.map((authorization) => (

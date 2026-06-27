@@ -5,15 +5,24 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CheckIcon,
+  CopyIcon,
   Loader2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+function getMessageText(message: EveMessage) {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n");
+}
 
 const STREAM_TEXT_TICK_MS = 60;
 const STREAM_TEXT_CACHE_LIMIT = 40;
@@ -28,13 +37,17 @@ export type AgentInputResponse = {
 export function AgentMessage({
   canRespond,
   isStreaming,
+  isLast,
   message,
   onInputResponses,
+  onRetry,
 }: {
   readonly canRespond: boolean;
+  readonly isLast: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onRetry?: () => void;
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
@@ -68,7 +81,71 @@ export function AgentMessage({
           showCaret={isStreaming && message.role === "assistant"}
         />
       </div>
+      {!isUser && !isStreaming ? (
+        <MessageActions
+          isLast={isLast}
+          message={message}
+          onRetry={onRetry}
+        />
+      ) : null}
     </article>
+  );
+}
+
+function MessageActions({
+  isLast,
+  message,
+  onRetry,
+}: {
+  readonly isLast: boolean;
+  readonly message: EveMessage;
+  readonly onRetry?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const text = getMessageText(message);
+
+  const handleCopy = useCallback(async () => {
+    if (!text) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+
+  return (
+    <div className="ml-2 flex shrink-0 flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={copied ? "Copied" : "Copy message"}
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+            disabled={!text}
+            onClick={handleCopy}
+            type="button"
+          >
+            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left">{copied ? "Copied" : "Copy"}</TooltipContent>
+      </Tooltip>
+      {isLast && onRetry ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label="Retry"
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+              onClick={onRetry}
+              type="button"
+            >
+              <Loader2Icon className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Regenerate</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
   );
 }
 
