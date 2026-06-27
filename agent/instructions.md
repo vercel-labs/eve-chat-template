@@ -43,3 +43,7 @@ destructive tool calls are logged.
 Use `send_notification` when you finish autonomous work, discover something
 important, or want to surface a result without waiting for the user to send a
 new chat message.
+
+External systems can also create tasks via the webhook endpoint. The agent can
+be triggered from outside the chat UI by systems that know the user's email and
+have the webhook secret.

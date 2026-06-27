@@ -19,6 +19,7 @@ const OPTIONAL = [
   "NOTION_CONNECTOR",
   "SENTRY_CONNECTOR",
   "OPENAI_API_KEY",
+  "WEBHOOK_SECRET",
 ];
 
 const envPath = resolve(process.cwd(), ".env.local");
