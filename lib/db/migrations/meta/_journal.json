@@ -57,6 +57,13 @@
       "when": 1782601150631,
       "tag": "0007_thankful_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782601880765,
+      "tag": "0008_mushy_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

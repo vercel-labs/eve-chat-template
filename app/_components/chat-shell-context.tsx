@@ -13,6 +13,7 @@ type ChatShellContextValue = {
   readonly activeChatId: string | null;
   readonly desktopSidebarOpen: boolean;
   readonly enabledConnections: EnabledConnections;
+  readonly memoryCount: number;
   readonly removeChat: (chatId: string) => void;
   readonly requestSignIn: (draft?: string) => void;
   readonly setActiveChatId: (chatId: string | null) => void;

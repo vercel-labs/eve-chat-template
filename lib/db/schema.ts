@@ -157,10 +157,25 @@ export const documentChunk = pgTable(
   ],
 );
 
-export type Chat = typeof chat.$inferSelect;
-export type ChatEvent = typeof chatEvent.$inferSelect;
-export type User = typeof user.$inferSelect;
-export type Attachment = typeof attachment.$inferSelect;
+export const memory = pgTable(
+  "memory",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    source: text("source"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_memory_user_key").on(table.userId, table.key),
+    index("idx_memory_user").on(table.userId),
+  ],
+);
+
 export const task = pgTable(
   "task",
   {
@@ -216,8 +231,13 @@ export const notification = pgTable(
   ],
 );
 
+export type Chat = typeof chat.$inferSelect;
+export type ChatEvent = typeof chatEvent.$inferSelect;
+export type User = typeof user.$inferSelect;
+export type Attachment = typeof attachment.$inferSelect;
 export type Document = typeof document.$inferSelect;
 export type DocumentChunk = typeof documentChunk.$inferSelect;
+export type Memory = typeof memory.$inferSelect;
 export type Task = typeof task.$inferSelect;
 export type ToolAuditLog = typeof toolAuditLog.$inferSelect;
 export type Notification = typeof notification.$inferSelect;

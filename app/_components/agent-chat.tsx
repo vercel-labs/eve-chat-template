@@ -13,6 +13,7 @@ import type { EveMessage } from "eve/react";
 import { defaultMessageReducer, useEveAgent } from "eve/react";
 import {
   AlertCircleIcon,
+  BrainIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
   LockIcon,
@@ -2256,11 +2257,11 @@ export function ComposerFooterControls({
 }: {
   readonly setupStatus: SetupStatus;
 }) {
-  const { enabledConnections, setConnectionEnabled } = useChatShell();
+  const { enabledConnections, memoryCount, setConnectionEnabled } = useChatShell();
 
   return (
     <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
-      <ComposerHint setupStatus={setupStatus} />
+      <ComposerHint memoryCount={memoryCount} setupStatus={setupStatus} />
       <IntegrationsMenu
         enabledConnections={enabledConnections}
         onConnectionEnabledChange={setConnectionEnabled}
@@ -2270,7 +2271,36 @@ export function ComposerFooterControls({
   );
 }
 
-function ComposerHint({ setupStatus }: { readonly setupStatus: SetupStatus }) {
+function MemoryCount({ count }: { readonly count: number }) {
+  if (count === 0) {
+    return null;
+  }
+
+  const label = count === 1 ? "1 memory" : `${count} memories`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex h-8 min-w-0 max-w-full items-center gap-1 rounded-md px-2 text-[15px] text-muted-foreground/50"
+          tabIndex={0}
+        >
+          <BrainIcon className="size-3.5 shrink-0" />
+          <span className="truncate">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{count} saved memory fact{count > 1 ? "s" : ""} available to eve</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ComposerHint({
+  memoryCount,
+  setupStatus,
+}: {
+  readonly memoryCount: number;
+  readonly setupStatus: SetupStatus;
+}) {
   if (!setupStatus.appReady) {
     const reason = getSetupRequiredReason(setupStatus);
 
@@ -2291,7 +2321,7 @@ function ComposerHint({ setupStatus }: { readonly setupStatus: SetupStatus }) {
     );
   }
 
-  return null;
+  return <MemoryCount count={memoryCount} />;
 }
 
 function getSetupRequiredReason(setupStatus: SetupStatus) {
