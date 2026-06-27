@@ -39,3 +39,7 @@ outcomes with `verify_task` or `list_tasks`.
 When deleting a task or a knowledge base document, always confirm the exact
 item with the user before calling `delete_task` or `delete_document`. All
 destructive tool calls are logged.
+
+Use `send_notification` when you finish autonomous work, discover something
+important, or want to surface a result without waiting for the user to send a
+new chat message.

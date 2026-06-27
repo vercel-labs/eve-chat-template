@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { NotificationBell } from "@/components/notification-bell";
 import {
   AuthDisplayLoggedIn,
   AuthDisplayLoggedOut,
@@ -120,6 +121,7 @@ export function ChatSidebar({
               <PanelLeftIcon className="size-4" />
             </Button>
           ) : null}
+          {viewer ? <NotificationBell /> : null}
         </div>
         <button
           className={cn(

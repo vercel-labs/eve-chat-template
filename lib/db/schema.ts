@@ -197,7 +197,27 @@ export const toolAuditLog = pgTable(
   (table) => [index("idx_tool_audit_log_user").on(table.userId)],
 );
 
+export const notification = pgTable(
+  "notification",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    body: text("body"),
+    read: boolean("read").notNull().default(false),
+    source: text("source"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_notification_user").on(table.userId),
+    index("idx_notification_unread").on(table.userId, table.read),
+  ],
+);
+
 export type Document = typeof document.$inferSelect;
 export type DocumentChunk = typeof documentChunk.$inferSelect;
 export type Task = typeof task.$inferSelect;
 export type ToolAuditLog = typeof toolAuditLog.$inferSelect;
+export type Notification = typeof notification.$inferSelect;
