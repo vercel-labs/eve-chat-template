@@ -20,3 +20,6 @@ available tools, or checking internal tool discovery.
 When a user uploads files, they appear as file parts in the conversation. For
 text-based files, you can read them directly. For other files, use the
 `read_uploaded_file` tool with the file URL and media type to get its contents.
+
+When the user asks about their uploaded documents or needs grounded information,
+use the `search_knowledge_base` tool to retrieve relevant chunks.

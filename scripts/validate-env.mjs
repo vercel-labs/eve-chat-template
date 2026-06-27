@@ -18,6 +18,7 @@ const OPTIONAL = [
   "LINEAR_CONNECTOR",
   "NOTION_CONNECTOR",
   "SENTRY_CONNECTOR",
+  "OPENAI_API_KEY",
 ];
 
 const envPath = resolve(process.cwd(), ".env.local");

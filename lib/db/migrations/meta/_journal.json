@@ -22,6 +22,13 @@
       "when": 1782597866729,
       "tag": "0002_colossal_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782598821756,
+      "tag": "0003_unusual_fat_cobra",
+      "breakpoints": true
     }
   ]
 }

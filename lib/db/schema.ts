@@ -9,6 +9,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { vector } from "drizzle-orm/pg-core/columns/vector_extension/vector";
 import type { HandleMessageStreamEvent, SessionState } from "eve/client";
 
 export const user = pgTable("user", {
@@ -116,7 +117,48 @@ export const attachment = pgTable(
   ],
 );
 
+export const document = pgTable(
+  "document",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    mediaType: text("media_type").notNull(),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_document_user").on(table.userId),
+  ],
+);
+
+export const documentChunk = pgTable(
+  "document_chunk",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => document.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    embedding: vector("embedding", { dimensions: 1536 }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_document_chunk_document").on(table.documentId),
+    index("idx_document_chunk_user").on(table.userId),
+  ],
+);
+
 export type Chat = typeof chat.$inferSelect;
 export type ChatEvent = typeof chatEvent.$inferSelect;
 export type User = typeof user.$inferSelect;
 export type Attachment = typeof attachment.$inferSelect;
+export type Document = typeof document.$inferSelect;
+export type DocumentChunk = typeof documentChunk.$inferSelect;
