@@ -5,6 +5,7 @@ import {
   BookIcon,
   ChevronDownIcon,
   EllipsisIcon,
+  LayoutDashboardIcon,
   PanelLeftIcon,
   PlusIcon,
   Trash2Icon,
@@ -206,6 +207,15 @@ export function ChatSidebar({
       </div>
 
       <div className="border-t border-border px-2 py-3">
+        {viewer ? (
+          <Link
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            href="/dashboard"
+          >
+            <LayoutDashboardIcon className="size-4" />
+            Dashboard
+          </Link>
+        ) : null}
         {viewer ? <KnowledgeBaseSection /> : null}
       </div>
 
