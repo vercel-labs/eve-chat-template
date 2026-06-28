@@ -24,6 +24,11 @@
   "pnpm": {
     "patchedDependencies": {
       "eve@0.8.3": "patches/eve@0.8.3.patch"
+    },
+    "overrides": {
+      "dompurify": "^3.4.11",
+      "esbuild": "^0.25.0",
+      "postcss": "^8.5.10"
     }
   },
   "dependencies": {
@@ -43,11 +48,11 @@
     "@vercel/connect": "0.2.4",
     "@vercel/speed-insights": "2.0.0",
     "ai": "7.0.0-canary.171",
-    "better-auth": "1.5.5",
+    "better-auth": "1.6.22",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
-    "drizzle-orm": "0.45.1",
+    "drizzle-orm": "0.45.2",
     "eve": "latest",
     "lucide-react": "1.16.0",
     "next": "16.2.6",
@@ -66,7 +71,7 @@
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
     "@typescript/native-preview": "7.0.0-dev.20260523.1",
-    "drizzle-kit": "0.31.9",
+    "drizzle-kit": "0.31.10",
     "microsandbox": "^0.5.7",
     "typescript": "5.9.3"
   }
