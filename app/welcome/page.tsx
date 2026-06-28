@@ -1,23 +1,14 @@
-import { SignInButton } from "@/components/auth/sign-in-button";
-import { GuestSignInButton } from "@/components/auth/guest-sign-in-button";
-import { getSetupStatus } from "@/lib/setup";
-import Link from "next/link";
+import { Suspense } from "react";
+import { WelcomeContent } from "./welcome-content";
 
-export default async function WelcomePage() {
-  const setupStatus = await getSetupStatus();
-
+export default function WelcomePage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex items-center justify-between px-6 py-4">
-        <Link className="flex items-center gap-2 text-lg font-semibold" href="/">
+        <a className="flex items-center gap-2 text-lg font-semibold" href="/">
           <img alt="eve" className="size-6 invert dark:invert-0" src="/eve.svg" />
           eve Agent
-        </Link>
-        <nav className="flex items-center gap-4">
-          <Link className="text-sm text-muted-foreground hover:text-foreground" href="/dashboard">
-            Dashboard
-          </Link>
-        </nav>
+        </a>
       </header>
 
       <main className="flex flex-1 flex-col items-center justify-center px-4 text-center">
@@ -29,16 +20,16 @@ export default async function WelcomePage() {
           notifications, and external webhooks.
         </p>
 
-        {setupStatus.appReady ? (
-          <div className="flex flex-col items-center gap-3 sm:flex-row">
-            <SignInButton className="h-11 px-6">Sign in with Vercel</SignInButton>
-            <GuestSignInButton className="h-11 px-6" />
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            App is still being configured. Check your environment variables.
-          </p>
-        )}
+        <Suspense
+          fallback={
+            <div className="flex flex-col items-center gap-3 sm:flex-row">
+              <div className="h-11 w-48 rounded-md bg-muted" />
+              <div className="h-11 w-48 rounded-md bg-muted" />
+            </div>
+          }
+        >
+          <WelcomeContent />
+        </Suspense>
       </main>
 
       <footer className="px-6 py-4 text-center text-sm text-muted-foreground">
