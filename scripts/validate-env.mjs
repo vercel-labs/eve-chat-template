@@ -20,6 +20,7 @@ const OPTIONAL = [
   "SENTRY_CONNECTOR",
   "OPENAI_API_KEY",
   "WEBHOOK_SECRET",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
 ];
 
 const envPath = resolve(process.cwd(), ".env.local");
