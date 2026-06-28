@@ -60,12 +60,12 @@ export const auth = betterAuth({
       }
     : {},
   plugins: [
-    nextCookies(),
     anonymous({
       emailDomainName: "guest.local",
       onLinkAccount: async () => {
         // TODO: migrate chats, memories, and documents from guest to signed-in user
       },
     }),
+    nextCookies(),
   ],
 });
