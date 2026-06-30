@@ -76,7 +76,7 @@ export async function completeTask(
       verificationNotes: verificationNotes?.trim() || null,
     })
     .where(and(eq(task.id, taskId), eq(task.userId, userId)))
-    .returning({ id: task.id, status: task.status });
+    .returning({ id: task.id, title: task.title, status: task.status });
 
   if (!row) {
     throw new Error("Task not found.");

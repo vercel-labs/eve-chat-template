@@ -298,6 +298,8 @@ If rate limiting setup is missing, provision Upstash Redis and pull env vars aga
 
 If Notion tool calls fail, confirm that `NOTION_CONNECTOR` is set in Vercel, the connector is attached to the project, and local env vars have been pulled again.
 
+If the dev logs show `Vercel CLI: The specified token is not valid`, it comes from the optional Vercel Connect integrations (Slack, Notion, Linear, Sentry) trying to reach Vercel during local development. It does not block chat, tasks, projections, or auth. To silence it, run `pnpm dlx vercel@latest login` and `vercel link` so the CLI has a valid token, or simply ignore it if you are not using those connectors locally. In production, the Vercel deployment authenticates these connections automatically through OIDC.
+
 ## Useful Links
 
 - [Vercel CLI](https://vercel.com/docs/cli)

@@ -20,6 +20,11 @@ export default defineTool({
     const task = await completeTask(userId, taskId, verificationNotes);
     await logToolCall(userId, "complete_task", { taskId, verificationNotes }, task);
 
-    return { completed: task.status === "completed", id: task.id, status: task.status };
+    return {
+      completed: task.status === "completed",
+      id: task.id,
+      title: task.title,
+      status: task.status,
+    };
   },
 });

@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { ProjectionCard } from "@/components/chat/tool/projection-card";
+import { TaskCard, TASK_TOOL_NAMES } from "@/components/chat/tool/task-card";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -450,6 +451,7 @@ function ToolGroup({
   const canExpand =
     parts.length > 1 ? parts.some(hasToolDetails) : hasToolDetails(parts[0]!);
   const projectionCoverage = getProjectionCoverage(parts);
+  const taskParts = parts.filter(isTaskCardPart);
 
   useEffect(() => {
     if (shouldOpen) {
@@ -483,6 +485,13 @@ function ToolGroup({
         ) : null}
       </CollapsibleTrigger>
       {projectionCoverage ? <ProjectionCoverageLine coverage={projectionCoverage} /> : null}
+      {taskParts.map((part) => (
+        <TaskCard
+          key={part.toolCallId}
+          output={part.output}
+          toolName={resolveToolName(part)}
+        />
+      ))}
       {canExpand ? (
         <CollapsibleContent className="ml-2 border-l border-border/40 pl-3 pt-0.5 pb-1">
           {parts.length === 1 ? (
@@ -889,6 +898,10 @@ function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(par
     return describeProjectionAction(part, status);
   }
 
+  if (TASK_TOOL_NAMES.has(name)) {
+    return describeTaskAction(part, status);
+  }
+
   const normalized = normalizeToolName(name);
   const input = asRecord(part.input);
   const query = readString(input, ["query", "q", "search", "pattern", "prompt", "text"]);
@@ -962,6 +975,11 @@ function isProjectionCardPart(part: EveDynamicToolPart): boolean {
   return Boolean(out && out.ok === true && out.scene);
 }
 
+/** Task tool calls with output render as a TaskCard (sempre visível). */
+function isTaskCardPart(part: EveDynamicToolPart): boolean {
+  return TASK_TOOL_NAMES.has(resolveToolName(part)) && part.state === "output-available";
+}
+
 // Narração viva da ação de projeção (backstage): "pedindo tal view", "navegando".
 function describeProjectionAction(part: EveDynamicToolPart, status: ToolStatus) {
   const running = status === "running";
@@ -979,6 +997,28 @@ function describeProjectionAction(part: EveDynamicToolPart, status: ToolStatus) 
   }
 
   return running ? "Pedindo projeção…" : "Projeção";
+}
+
+// Narração viva das tools de tarefa, em português.
+function describeTaskAction(part: EveDynamicToolPart, status: ToolStatus) {
+  const running = status === "running";
+  const name = resolveToolName(part);
+  const input = asRecord(part.input);
+  const title = readString(input, ["title"]);
+
+  switch (name) {
+    case "create_task":
+      if (running) return "Criando tarefa…";
+      return title ? `Criou tarefa: ${truncateInline(title, 60)}` : "Criou tarefa";
+    case "list_tasks":
+      return running ? "Listando tarefas…" : "Listou tarefas";
+    case "complete_task":
+      return running ? "Concluindo tarefa…" : "Concluiu tarefa";
+    case "verify_task":
+      return running ? "Verificando tarefa…" : "Verificou tarefa";
+    default:
+      return running ? "Processando tarefa…" : "Tarefa";
+  }
 }
 
 type ProjectionCoverage = {
