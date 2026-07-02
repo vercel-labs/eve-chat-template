@@ -8,7 +8,10 @@ import {
   type AgentChatControllerStatus,
 } from "@/app/_components/agent-chat";
 import { useChatShell } from "@/app/_components/chat-shell-context";
+import { uploadAttachment } from "@/app/actions/attachments";
+import { createChatAction } from "@/app/actions/chat";
 import { ChatComposer } from "@/components/chat/composer";
+import type { PendingAttachment } from "@/components/chat/attachments";
 import { TemplateFooterLinks } from "@/components/chat/template-footer-links";
 import { getChatMessageLengthError } from "@/lib/chat/limits";
 import {
@@ -28,9 +31,15 @@ export function HomeChatPage() {
     requestSignIn,
     setActiveChatId,
     setupStatus,
+    touchChat,
     viewer,
   } = useChatShell();
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachmentsState] = useState<PendingAttachment[]>([]);
+  const setAttachments = useCallback(
+    (next: readonly PendingAttachment[]) => setAttachmentsState(next as PendingAttachment[]),
+    [],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -48,6 +57,7 @@ export function HomeChatPage() {
     if (pathname === "/") {
       submittingRef.current = false;
       setSubmitting(false);
+      setAttachments([]);
     }
   }, [pathname]);
 
@@ -69,20 +79,22 @@ export function HomeChatPage() {
   }, [clientError]);
 
   const handleSubmit = useCallback(
-    (text: string) => {
+    async ({ attachments: submitAttachments, text }: { readonly attachments: readonly PendingAttachment[]; readonly text: string }) => {
       const message = text.trim();
 
-      if (!message || submittingRef.current) {
+      if ((!message && submitAttachments.length === 0) || submittingRef.current) {
         return;
       }
 
       setClientError(null);
 
-      const lengthError = getChatMessageLengthError(message);
+      if (message) {
+        const lengthError = getChatMessageLengthError(message);
 
-      if (lengthError) {
-        setClientError(lengthError);
-        return;
+        if (lengthError) {
+          setClientError(lengthError);
+          return;
+        }
       }
 
       if (!setupReady) {
@@ -101,20 +113,40 @@ export function HomeChatPage() {
       submittingRef.current = true;
       setSubmitting(true);
       setDraft("");
+      setAttachments([]);
 
-      const provisionalChatId = createProvisionalChatId();
-      const didStoreMessage = writePendingChatMessage(provisionalChatId, message);
+      try {
+        const created = await createChatAction({ pendingUserMessage: message || undefined });
+        let uploadedAttachments: { readonly filename: string; readonly mediaType: string; readonly url: string }[] = [];
 
-      if (!didStoreMessage) {
+        if (submitAttachments.length > 0) {
+          uploadedAttachments = await Promise.all(
+            submitAttachments
+              .filter((pending): pending is Extract<typeof pending, { type: "local" }> => pending.type === "local")
+              .map((pending) => uploadAttachment({ chatId: created.id, file: pending.file })),
+          );
+        }
+
+        const didStoreMessage = writePendingChatMessage(
+          created.id,
+          message,
+          uploadedAttachments,
+        );
+
+        if (!didStoreMessage) {
+          throw new Error("Failed to store pending chat.");
+        }
+
+        touchChat(created);
+        setActiveChatId(created.id);
+        router.push(`/chat/${created.id}`, { scroll: false });
+      } catch (error) {
         submittingRef.current = false;
         setSubmitting(false);
         setDraft(message);
-        setClientError("Failed to start chat.");
-        return;
+        setAttachments(submitAttachments);
+        setClientError(error instanceof Error ? error.message : "Failed to start chat.");
       }
-
-      setActiveChatId(provisionalChatId);
-      router.push(`/chat/${provisionalChatId}`, { scroll: false });
     },
     [
       requestSignIn,
@@ -123,6 +155,7 @@ export function HomeChatPage() {
       setupReady,
       setupStatus,
       submitting,
+      touchChat,
       viewer,
     ],
   );
@@ -158,12 +191,14 @@ export function HomeChatPage() {
               />
             </h1>
             <ChatComposer
+              attachments={attachments}
               autoFocus
               disabled={composerDisabled}
               disabledReason={composerDisabledReason}
               footerStart={<ComposerFooterControls setupStatus={setupStatus} />}
               isBusy={IDLE_CONTROLLER_STATUS.isBusy}
               isPreparing={submitting}
+              onAttachmentsChange={setAttachments}
               onChange={setDraft}
               onStop={() => {}}
               onSubmit={handleSubmit}

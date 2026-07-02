@@ -23,6 +23,7 @@ export async function getServerViewer(setupStatus?: SetupStatus): Promise<Viewer
       email: session.user.email,
       id: session.user.id,
       image: session.user.image ?? null,
+      isAnonymous: (session.user as { isAnonymous?: boolean }).isAnonymous ?? false,
       name: session.user.name,
     };
   } catch {

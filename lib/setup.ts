@@ -24,6 +24,26 @@ export function isRateLimitConfigured() {
   return RATE_LIMIT_ENV_GROUPS.some((group) => group.every(hasEnv));
 }
 
+function checkRegisteredProviders(): string[] {
+  const issues: string[] = [];
+  const knownReaders = new Set(["local", "http"]);
+  const explicitReader = process.env.PROJECTION_READER;
+  if (explicitReader && !knownReaders.has(explicitReader)) {
+    issues.push(`unregistered projection reader: ${explicitReader}`);
+  }
+  const knownLabs = new Set(["local", "http"]);
+  const explicitLab = process.env.LAB_PROVIDER;
+  if (explicitLab && !knownLabs.has(explicitLab)) {
+    issues.push(`unregistered Lab provider: ${explicitLab}`);
+  }
+  const knownEmbedders = new Set(["gateway", "google", "local"]);
+  const explicitEmbed = process.env.EMBEDDING_PROVIDER;
+  if (explicitEmbed && !knownEmbedders.has(explicitEmbed)) {
+    issues.push(`unregistered embedding provider: ${explicitEmbed}`);
+  }
+  return issues;
+}
+
 export function getInitialSetupStatus(): SetupStatus {
   return createSetupStatus({
     databaseSchemaReady: isDatabaseConfigured(),
@@ -59,6 +79,7 @@ function createSetupStatus({
     ...(databaseConfigured && !databaseSchemaReady ? ["database migrations"] : []),
     ...AUTH_ENV_KEYS.filter((key) => !hasEnv(key)),
     ...(rateLimitReady ? [] : ["UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN"]),
+    ...checkRegisteredProviders(),
   ];
 
   return {

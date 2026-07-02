@@ -46,6 +46,10 @@ export async function enforceRateLimit(options: LimitOptions) {
   const client = getRedis();
 
   if (!client) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("Rate limit skipped: Redis is not configured.");
+    }
+
     return;
   }
 

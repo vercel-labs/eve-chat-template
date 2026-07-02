@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronsUpDownIcon, Loader2Icon, LogOutIcon } from "lucide-react";
+import { ChevronsUpDownIcon, Loader2Icon, LogOutIcon, UserIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { VercelIcon } from "@/components/icons";
 import {
@@ -18,6 +18,8 @@ import type { Viewer } from "@/lib/chat/types";
 export function UserMenu({ viewer }: { readonly viewer: Viewer }) {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+  const displayName = viewer.isAnonymous ? "Guest" : viewer.name;
+  const displayEmail = viewer.isAnonymous ? "Anonymous session" : viewer.email;
 
   return (
     <DropdownMenu>
@@ -28,9 +30,9 @@ export function UserMenu({ viewer }: { readonly viewer: Viewer }) {
         >
           <UserAvatar viewer={viewer} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-medium text-foreground">{viewer.name}</span>
+            <span className="block truncate text-xs font-medium text-foreground">{displayName}</span>
             <span className="block truncate text-[11px] text-muted-foreground">
-              {viewer.email}
+              {displayEmail}
             </span>
           </span>
           <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" />
@@ -38,12 +40,25 @@ export function UserMenu({ viewer }: { readonly viewer: Viewer }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56" side="top" sideOffset={8}>
         <DropdownMenuLabel className="min-w-0">
-          <span className="block truncate text-sm">{viewer.name}</span>
+          <span className="block truncate text-sm">{displayName}</span>
           <span className="block truncate text-xs font-normal text-muted-foreground">
-            {viewer.email}
+            {displayEmail}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {viewer.isAnonymous ? (
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              void authClient.signIn.social({
+                provider: "vercel",
+              });
+            }}
+          >
+            <UserIcon className="size-4" />
+            Link Vercel account
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem
           aria-busy={signingOut}
           disabled={signingOut}

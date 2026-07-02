@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { deleteChatAction } from "@/app/actions/chat";
+import { getMemoryCountAction } from "@/app/actions/memory";
 import {
   CHAT_BOOTSTRAP_SYNC_EVENT,
   type ChatBootstrapSyncDetail,
@@ -61,10 +62,12 @@ export function AgentChatShell({
   const [setupStatusState, setSetupStatusState] = useState(setupStatus);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [enabledConnections, setEnabledConnections] = useState<EnabledConnections>({
+    lab: true,
     linear: true,
     notion: true,
     sentry: true,
   });
+  const [memoryCount, setMemoryCount] = useState(0);
   const cursorRef = useRef(initialNextCursor);
   const activeChatIdRef = useRef(activeChatId);
   const setupReady = setupStatusState.appReady;
@@ -73,6 +76,24 @@ export function AgentChatShell({
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const count = await getMemoryCountAction();
+
+      if (!cancelled) {
+        setMemoryCount(count);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerState?.id]);
 
   useEffect(() => {
     cursorRef.current = nextCursor;
@@ -248,6 +269,7 @@ export function AgentChatShell({
       activeChatId,
       desktopSidebarOpen,
       enabledConnections,
+      memoryCount,
       removeChat,
       requestSignIn,
       setActiveChatId,
@@ -261,6 +283,7 @@ export function AgentChatShell({
       activeChatId,
       desktopSidebarOpen,
       enabledConnections,
+      memoryCount,
       removeChat,
       requestSignIn,
       setConnectionEnabled,

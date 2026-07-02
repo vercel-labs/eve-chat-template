@@ -2,7 +2,7 @@
 
 import type { ComponentType } from "react";
 import { HammerIcon } from "lucide-react";
-import { LinearIcon, NotionIcon, SentryIcon } from "@/components/icons";
+import { LinearIcon, NotionIcon, SentryIcon, LabIcon } from "@/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,7 @@ type ConnectionItem = {
 };
 
 const CONNECTION_ITEMS: readonly ConnectionItem[] = [
+  { key: "lab", label: "Lab", Icon: LabIcon },
   { key: "notion", label: "Notion", Icon: NotionIcon },
   { key: "linear", label: "Linear", Icon: LinearIcon },
   { key: "sentry", label: "Sentry", Icon: SentryIcon },

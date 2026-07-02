@@ -325,6 +325,7 @@ For every event:
 A turn is considered settled when `lib/chat/events.ts` sees one of:
 
 ```ts
+authorization.required
 session.completed
 session.failed
 session.waiting
@@ -553,11 +554,11 @@ start a fresh turn with the updated context.
 The composer footer contains `ComposerFooterControls`, which renders
 `IntegrationsMenu`.
 
-Right now the only user-visible connection toggle is Notion. The toggle state is
-kept in `AgentChatShell` as:
+The user-visible connection toggles are Lab, Notion, Linear, and Sentry. The
+toggle state is kept in `AgentChatShell` as:
 
 ```ts
-enabledConnections = { notion: true }
+enabledConnections = { lab: true, linear: true, notion: true, sentry: true }
 ```
 
 When a message is sent, the app passes a natural-language `clientContext` to
@@ -567,9 +568,10 @@ eve:
 createConnectionClientContext(enabledConnections)
 ```
 
-If a connection is enabled, the context tells eve which of Notion, Linear, and
-Sentry the user enabled for this turn. Disabled connections are called out so
-the model does not use them unless the user enables them first.
+If a connection is enabled, the context tells eve which of Lab, Notion, Linear,
+and Sentry the user enabled for this turn. Disabled connections are called out so
+the model does not use them unless the user enables them first. When Lab is
+disabled, the context explicitly tells the model not to call `propose_effect`.
 
 This toggle does not provision, create, or revoke a Vercel Connect connector. It
 only controls per-turn agent behavior.
@@ -591,6 +593,48 @@ For production, set `NOTION_CONNECTOR`, `LINEAR_CONNECTOR`, and
 `SENTRY_CONNECTOR` to the returned Vercel Connect connector UIDs. For local
 development, connectors created with `--name notion`, `--name linear`, and
 `--name sentry` match the fallback names.
+
+## Dynamic Projections
+
+The agent perceives real state through Dynamic Projections (`build_projection` /
+`navigate_projection`). These are read-only views over the app's own tables
+(tasks, audit trail, notifications) by default. No external runtime is required.
+
+The boundary is `SceneReaders.readRows(scope) -> SceneRawRows`. The default
+`LocalSceneReader` queries the app's Postgres directly. If
+`DREAM_MACHINE_RUNTIME_URL` is set (or `PROJECTION_READER` is set to a
+registered plugin id), the registry swaps in an HTTP reader or a third-party
+reader without touching the engine.
+
+`build_projection` opens a view with a natural-language goal; `navigate_projection`
+navigates the ladder (drill, group, filter, ascend, descend, back, etc.). Every
+projection is content-addressed and persisted in the `projection` table so
+`scene.back` reopens the exact parent by hash. The engine derives `stuck`,
+`waiting_on`, and `risk` from the row shapes honestly. The agent always honors
+`loss_accounting` and never claims completeness from a partial view.
+
+## Lab Plugin
+
+`propose_effect` is the airlock: the agent proposes an effect, the turn pauses
+for human approval, and the Lab admits it. The default `LocalLab` writes real
+consequences into the app's own tables — a task, a notification, or an audit row.
+It refuses irreversible effects (configure an external Lab for those). External
+Labs (including the dream-machine runtime) are registered plugins selected via
+`DREAM_MACHINE_LAB_URL` or `LAB_PROVIDER`.
+
+The Lab toggle appears in the same connections menu as Notion, Linear, and
+Sentry. When disabled, `propose_effect` is suppressed from the client context.
+
+## Embeddings and Ingestion
+
+Document embeddings route through the Vercel AI Gateway on the agent's existing
+credential. No separate `OPENAI_API_KEY` is needed. The default provider is
+`gateway` (`openai/text-embedding-3-small`, 1536 dimensions). Alternative
+providers (`google` via `@ai-sdk/google`, `local` via `transformers.js`) can be
+registered and selected via `EMBEDDING_PROVIDER`.
+
+Upload a document and it is chunked, inserted as `pending`, and embedded in the
+background. Retrieval (`search_knowledge_base`) only queries `ready` documents.
 
 ## Auth
 

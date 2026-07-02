@@ -1,6 +1,7 @@
 {
-  "name": "eve-chat-template",
-  "version": "0.0.0",
+  "name": "independent-eve",
+  "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.12.4",
   "imports": {
@@ -14,6 +15,7 @@
     "db:migrate:production": "vercel env run -e production -- pnpm db:migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "env:validate": "node scripts/validate-env.mjs",
     "dev": "next dev",
     "start": "next start",
     "typecheck": "next typegen && tsgo --noEmit -p tsconfig.json",
@@ -23,9 +25,15 @@
   "pnpm": {
     "patchedDependencies": {
       "eve@0.8.3": "patches/eve@0.8.3.patch"
+    },
+    "overrides": {
+      "dompurify": "^3.4.11",
+      "esbuild": "^0.25.0",
+      "postcss": "^8.5.10"
     }
   },
   "dependencies": {
+    "@ai-sdk/otel": "^1.0.4",
     "@neondatabase/serverless": "1.0.2",
     "@shikijs/core": "4.1.0",
     "@shikijs/engine-javascript": "4.1.0",
@@ -37,15 +45,18 @@
     "@tailwindcss/postcss": "4.3.0",
     "@upstash/redis": "1.38.0",
     "@vercel/analytics": "2.0.1",
+    "@vercel/blob": "^2.5.0",
     "@vercel/connect": "0.2.4",
+    "@vercel/otel": "^2.1.3",
     "@vercel/speed-insights": "2.0.0",
     "ai": "7.0.0-canary.171",
-    "better-auth": "1.5.5",
+    "better-auth": "1.6.22",
+    "canonicalize": "^3.0.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
-    "drizzle-orm": "0.45.1",
-    "eve": "latest",
+    "drizzle-orm": "0.45.2",
+    "eve": "0.8.3",
     "lucide-react": "1.16.0",
     "next": "16.2.6",
     "radix-ui": "1.4.3",
@@ -63,7 +74,7 @@
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
     "@typescript/native-preview": "7.0.0-dev.20260523.1",
-    "drizzle-kit": "0.31.9",
+    "drizzle-kit": "0.31.10",
     "microsandbox": "^0.5.7",
     "typescript": "5.9.3"
   }

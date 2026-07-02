@@ -17,6 +17,7 @@ import { RateLimitError, enforceRateLimit } from "@/lib/rate-limit";
 import { getServerViewer } from "@/lib/session";
 
 const SEND_LIMIT = 25;
+const GUEST_SEND_LIMIT = 5;
 const SEND_WINDOW_SECONDS = 60 * 60;
 
 export async function createChatAction(input?: { readonly pendingUserMessage?: string }) {
@@ -28,7 +29,7 @@ export async function createChatAction(input?: { readonly pendingUserMessage?: s
 
   await enforceRateLimit({
     key: viewer.id,
-    limit: SEND_LIMIT,
+    limit: viewer.isAnonymous ? GUEST_SEND_LIMIT : SEND_LIMIT,
     prefix: "chat:create",
     windowSeconds: SEND_WINDOW_SECONDS,
   });
@@ -48,7 +49,7 @@ export async function checkSendLimitAction(input?: { readonly message?: string }
 
     await enforceRateLimit({
       key: viewer.id,
-      limit: SEND_LIMIT,
+      limit: viewer.isAnonymous ? GUEST_SEND_LIMIT : SEND_LIMIT,
       prefix: "chat:send",
       windowSeconds: SEND_WINDOW_SECONDS,
     });

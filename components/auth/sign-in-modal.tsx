@@ -1,5 +1,6 @@
 "use client";
 
+import { GuestSignInButton } from "@/components/auth/guest-sign-in-button";
 import { SignInButton } from "@/components/auth/sign-in-button";
 import { VercelIcon } from "@/components/icons";
 import {
@@ -44,6 +45,20 @@ export function SignInModal({
         >
           Continue with Vercel
         </SignInButton>
+        <div className="relative py-1">
+          <span className="absolute inset-0 flex items-center">
+            <span className="w-full border-t border-border" />
+          </span>
+          <span className="relative flex justify-center">
+            <span className="bg-background px-2 text-xs text-muted-foreground">or</span>
+          </span>
+        </div>
+        <GuestSignInButton
+          className="h-11 w-full"
+          disabled={disabled}
+          onBeforeSignIn={onBeforeSignIn}
+          variant="outline"
+        />
       </DialogContent>
     </Dialog>
   );

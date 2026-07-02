@@ -13,14 +13,17 @@ import type { EveMessage } from "eve/react";
 import { defaultMessageReducer, useEveAgent } from "eve/react";
 import {
   AlertCircleIcon,
+  BrainIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
   LockIcon,
+  PaperclipIcon,
   PlugIcon,
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { uploadAttachment } from "@/app/actions/attachments";
 import {
   checkSendLimitAction,
   appendChatEventAction,
@@ -31,6 +34,7 @@ import {
   saveChatSessionStateAction,
   skipChatAuthorizationAction,
 } from "@/app/actions/chat";
+import type { PendingAttachment } from "@/components/chat/attachments";
 import {
   useChatShell,
   type EnabledConnections,
@@ -40,8 +44,10 @@ import {
   ChatConversationContent,
   ChatScrollButton,
 } from "@/components/chat/conversation";
+import { UploadedAttachmentList } from "@/components/chat/attachments";
 import { IntegrationsMenu } from "@/components/chat/integrations-menu";
 import { AgentMessage } from "@/components/chat/message";
+import { ProjectionNavProvider } from "@/components/chat/tool/projection-card";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isChatTurnSettledEvent } from "@/lib/chat/events";
@@ -63,12 +69,19 @@ type StreamSessionOptions = {
 
 export type DraftHandlers = {
   readonly clearDraft: () => void;
+  readonly clearAttachments?: () => void;
+  readonly restoreAttachments?: (attachments: readonly PendingAttachmentMetadata[]) => void;
   readonly restoreDraft: (value: string) => void;
 };
 
 export type AgentChatController = {
   readonly reset: () => void;
-  readonly sendMessage: (text: string, draftHandlers: DraftHandlers) => Promise<void>;
+  readonly retry: () => void;
+  readonly sendMessage: (
+    text: string,
+    draftHandlers: DraftHandlers,
+    attachments?: readonly PendingAttachment[],
+  ) => Promise<void>;
   readonly stop: () => void;
 };
 
@@ -195,6 +208,35 @@ function createInitialSessionState(): SessionState {
 
 function normalizeSendInput(input: SendTurnInput) {
   return typeof input === "string" ? { message: input } : input;
+}
+
+type MessagePart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly data: URL; readonly mediaType: string; readonly type: "file" };
+
+function buildMessageWithAttachments(
+  text: string,
+  attachments: readonly { readonly filename: string; readonly mediaType: string; readonly url: string }[],
+): string | MessagePart[] {
+  if (attachments.length === 0) {
+    return text;
+  }
+
+  const parts: MessagePart[] = [];
+
+  if (text.trim()) {
+    parts.push({ type: "text", text });
+  }
+
+  for (const attachment of attachments) {
+    parts.push({
+      type: "file",
+      data: new URL(attachment.url),
+      mediaType: attachment.mediaType,
+    });
+  }
+
+  return parts as unknown as string | MessagePart[];
 }
 
 async function postSessionTurn(
@@ -696,6 +738,7 @@ export function AgentChatSession({
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
   const [streamEvents, setStreamEvents] = useState<HandleMessageStreamEvent[]>([]);
   const [localEvents, setLocalEvents] = useState<HandleMessageStreamEvent[]>([]);
+  const [sessionAttachments, setSessionAttachments] = useState<PendingAttachmentMetadata[]>([]);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
@@ -706,6 +749,7 @@ export function AgentChatSession({
   const activeChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
   const eventIndexRef = useRef(activeChat?.events.length ?? 0);
   const eventIndexChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
+  const lastUserMessageRef = useRef<{ readonly text: string; readonly attachments: readonly PendingAttachment[] } | null>(null);
   const knownInitialEventsRef = useRef<readonly HandleMessageStreamEvent[]>(
     activeChat?.events ?? [],
   );
@@ -807,6 +851,7 @@ export function AgentChatSession({
           updatedAt: new Date().toISOString(),
         });
         onActiveChatUpdated?.({
+          attachments: activeChat?.attachments ?? [],
           events,
           id: chatId,
           pendingUserMessage: null,
@@ -1016,18 +1061,25 @@ export function AgentChatSession({
   );
 
   const sendMessage = useCallback(
-    async (text: string, draftHandlers: DraftHandlers) => {
+    async (
+      text: string,
+      draftHandlers: DraftHandlers,
+      pendingAttachments: readonly PendingAttachment[] = [],
+    ) => {
       const message = text.trim();
+      const hasContent = message || pendingAttachments.length > 0;
 
-      if (!message || isTurnBlocked || localPendingUserMessageRef.current) {
+      if (!hasContent || isTurnBlocked || localPendingUserMessageRef.current) {
         return;
       }
 
-      const lengthError = getChatMessageLengthError(message);
+      if (message) {
+        const lengthError = getChatMessageLengthError(message);
 
-      if (lengthError) {
-        setClientError(lengthError);
-        return;
+        if (lengthError) {
+          setClientError(lengthError);
+          return;
+        }
       }
 
       if (isWaitingForAuthorization) {
@@ -1038,7 +1090,9 @@ export function AgentChatSession({
 
       const showLocalPendingMessage = () => {
         setLocalPendingUserMessage(message);
+        lastUserMessageRef.current = { attachments: pendingAttachments, text: message };
         draftHandlers.clearDraft();
+        draftHandlers.clearAttachments?.();
       };
       const restoreAfterFailedSend = (errorMessage?: string) => {
         clearLocalPendingUserMessage();
@@ -1094,6 +1148,42 @@ export function AgentChatSession({
         return;
       }
 
+      let uploadedAttachments: { readonly filename: string; readonly mediaType: string; readonly url: string }[] = [];
+
+      if (pendingAttachments.length > 0) {
+        try {
+          const uploads = await Promise.all(
+            pendingAttachments.map((pending) => {
+              if (pending.type === "uploaded") {
+                return {
+                  filename: pending.filename,
+                  mediaType: pending.mediaType,
+                  url: pending.url,
+                };
+              }
+
+              return uploadAttachment({ chatId, file: pending.file });
+            }),
+          );
+          uploadedAttachments = uploads;
+          setSessionAttachments((current) => [
+            ...current,
+            ...uploads.map((upload) => ({
+              filename: upload.filename,
+              id: upload.url,
+              mediaType: upload.mediaType,
+              size: 0,
+              url: upload.url,
+            })),
+          ]);
+        } catch (error) {
+          restoreAfterFailedSend(
+            error instanceof Error ? error.message : "Failed to upload attachments.",
+          );
+          return;
+        }
+      }
+
       try {
         const updated = await markChatPendingMessageAction({
           chatId,
@@ -1111,7 +1201,7 @@ export function AgentChatSession({
         startFinalizingTurn();
         await agent.send({
           clientContext: createConnectionClientContext(enabledConnections),
-          message,
+          message: buildMessageWithAttachments(message, uploadedAttachments),
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -1241,6 +1331,7 @@ export function AgentChatSession({
         setLocalEvents([]);
         touchChat(result.chat);
         onActiveChatUpdated?.({
+          attachments: activeChat?.attachments ?? [],
           events: skippedEvents,
           id: chatId,
           pendingUserMessage: null,
@@ -1299,6 +1390,15 @@ export function AgentChatSession({
       localEventsRef.current = [];
       setStreamEvents([]);
       setLocalEvents([]);
+      setSessionAttachments(
+        activeChat?.attachments.map((attachment) => ({
+          filename: attachment.filename,
+          id: attachment.id,
+          mediaType: attachment.mediaType,
+          size: attachment.size,
+          url: attachment.url,
+        })) ?? [],
+      );
       stopFinalizingTurn();
       clearLocalPendingUserMessage();
     } else if (!isTurnBlocked) {
@@ -1421,6 +1521,7 @@ export function AgentChatSession({
           updatedAt: new Date().toISOString(),
         });
         onActiveChatUpdated?.({
+          attachments: activeChat.attachments,
           events: allEvents,
           id: activeChat.id,
           pendingUserMessage: null,
@@ -1478,10 +1579,30 @@ export function AgentChatSession({
     }
   }, [clearLocalPendingUserMessage, displayMessages, localPendingUserMessage]);
 
+  const retry = useCallback(() => {
+    const last = lastUserMessageRef.current;
+
+    if (!last || isTurnBlocked || localPendingUserMessageRef.current) {
+      return;
+    }
+
+    void sendMessage(last.text, { clearDraft: () => {}, restoreDraft: () => {} }, last.attachments);
+  }, [isTurnBlocked, localPendingUserMessageRef, sendMessage]);
+
+  // ProjectionCard dispara navegação da ladder enviando uma instrução ao agente,
+  // que então chama navigate_projection. O card não chama a tool diretamente.
+  const navigateProjection = useCallback(
+    (instruction: string) => {
+      void sendMessage(instruction, { clearDraft: () => {}, restoreDraft: () => {} });
+    },
+    [sendMessage],
+  );
+
   useEffect(() => {
     onControllerChange(
       {
         reset: resetSession,
+        retry,
         sendMessage,
         stop: agent.stop,
       },
@@ -1502,14 +1623,36 @@ export function AgentChatSession({
     isWaitingForAuthorization,
     onControllerChange,
     resetSession,
+    retry,
     sendMessage,
   ]);
 
   useEffect(() => {
-    return () => {
-      onControllerChange(null, IDLE_CONTROLLER_STATUS);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA" || event.target.isContentEditable)) {
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        setShellActiveChatId(null);
+        router.push("/");
+        return;
+      }
+
+      if (event.key === "/") {
+        event.preventDefault();
+        const input = document.querySelector<HTMLTextAreaElement>("[data-chat-composer-input]");
+        input?.focus();
+      }
     };
-  }, [onControllerChange]);
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onControllerChange, router, setShellActiveChatId]);
 
   return (
     <>
@@ -1532,22 +1675,47 @@ export function AgentChatSession({
           ) : (
             <ChatConversation>
               <ChatConversationContent>
-                {visibleMessages.map((message, index) => (
-                  <AgentMessage
-                    canRespond={
-                      !isTurnBlocked &&
-                      !isWaitingForAuthorization &&
-                      Boolean(viewer) &&
-                      isSetupReady
+                {(() => {
+                  const allAttachments = [
+                    ...(activeChat?.attachments ?? []),
+                    ...sessionAttachments,
+                  ];
+                  const seen = new Set<string>();
+                  const uniqueAttachments = allAttachments.filter((attachment) => {
+                    if (seen.has(attachment.url)) {
+                      return false;
                     }
-                    isStreaming={
-                      agent.status === "streaming" && index === visibleMessages.length - 1
-                    }
-                    key={message.id}
-                    message={message}
-                    onInputResponses={handleInputResponses}
-                  />
-                ))}
+                    seen.add(attachment.url);
+                    return true;
+                  });
+
+                  return uniqueAttachments.length > 0 ? (
+                    <UploadedAttachmentList
+                      attachments={uniqueAttachments}
+                      className="pb-2"
+                    />
+                  ) : null;
+                })()}
+                <ProjectionNavProvider navigate={navigateProjection}>
+                  {visibleMessages.map((message, index) => (
+                    <AgentMessage
+                      canRespond={
+                        !isTurnBlocked &&
+                        !isWaitingForAuthorization &&
+                        Boolean(viewer) &&
+                        isSetupReady
+                      }
+                      isLast={index === visibleMessages.length - 1 && message.role === "assistant"}
+                      isStreaming={
+                        agent.status === "streaming" && index === visibleMessages.length - 1
+                      }
+                      key={message.id}
+                      message={message}
+                      onInputResponses={handleInputResponses}
+                      onRetry={message.role === "assistant" ? retry : undefined}
+                    />
+                  ))}
+                </ProjectionNavProvider>
                 {pendingAuthorizations.map((authorization) => (
                   <ConnectionAuthorizationPrompt
                     authorization={authorization}
@@ -1912,6 +2080,14 @@ function appendPendingUserMessages(
   return nextMessages;
 }
 
+type PendingAttachmentMetadata = {
+  readonly filename: string;
+  readonly id: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly url: string;
+};
+
 function createPendingUserMessage(
   chatId: string,
   text: string,
@@ -1951,6 +2127,7 @@ function usePendingUserMessage() {
 }
 
 const CONNECTION_LABELS = {
+  lab: "Lab",
   linear: "Linear",
   notion: "Notion",
   sentry: "Sentry",
@@ -1974,10 +2151,16 @@ function createConnectionClientContext(enabledConnections: EnabledConnections) {
         ? ` Do not use disabled connections unless the user enables them first: ${disabled.join(", ")}.`
         : "";
 
-    return `The user has enabled these external connections for this turn: ${enabled.join(", ")}. Use an enabled connection when it is relevant to the user's request.${disabledContext}`;
+    let context = `The user has enabled these external connections for this turn: ${enabled.join(", ")}. Use an enabled connection when it is relevant to the user's request.${disabledContext}`;
+
+    if (!enabledConnections.lab) {
+      context += " Effects are disabled this turn; do not call propose_effect.";
+    }
+
+    return context;
   }
 
-  return "The user has disabled all external connections for this turn. Do not search or call connection tools unless the user enables a connection first.";
+  return "The user has disabled all external connections for this turn. Do not search or call connection tools unless the user enables a connection first. Effects are disabled this turn; do not call propose_effect.";
 }
 
 function useThinkingPresence(active: boolean) {
@@ -2093,11 +2276,11 @@ export function ComposerFooterControls({
 }: {
   readonly setupStatus: SetupStatus;
 }) {
-  const { enabledConnections, setConnectionEnabled } = useChatShell();
+  const { enabledConnections, memoryCount, setConnectionEnabled } = useChatShell();
 
   return (
     <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
-      <ComposerHint setupStatus={setupStatus} />
+      <ComposerHint memoryCount={memoryCount} setupStatus={setupStatus} />
       <IntegrationsMenu
         enabledConnections={enabledConnections}
         onConnectionEnabledChange={setConnectionEnabled}
@@ -2107,7 +2290,36 @@ export function ComposerFooterControls({
   );
 }
 
-function ComposerHint({ setupStatus }: { readonly setupStatus: SetupStatus }) {
+function MemoryCount({ count }: { readonly count: number }) {
+  if (count === 0) {
+    return null;
+  }
+
+  const label = count === 1 ? "1 memory" : `${count} memories`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex h-8 min-w-0 max-w-full items-center gap-1 rounded-md px-2 text-[15px] text-muted-foreground/50"
+          tabIndex={0}
+        >
+          <BrainIcon className="size-3.5 shrink-0" />
+          <span className="truncate">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{count} saved memory fact{count > 1 ? "s" : ""} available to eve</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ComposerHint({
+  memoryCount,
+  setupStatus,
+}: {
+  readonly memoryCount: number;
+  readonly setupStatus: SetupStatus;
+}) {
   if (!setupStatus.appReady) {
     const reason = getSetupRequiredReason(setupStatus);
 
@@ -2128,7 +2340,7 @@ function ComposerHint({ setupStatus }: { readonly setupStatus: SetupStatus }) {
     );
   }
 
-  return null;
+  return <MemoryCount count={memoryCount} />;
 }
 
 function getSetupRequiredReason(setupStatus: SetupStatus) {

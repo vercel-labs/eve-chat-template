@@ -2,19 +2,24 @@
 
 import {
   ArrowRightIcon,
+  BookIcon,
+  ChevronDownIcon,
   EllipsisIcon,
+  LayoutDashboardIcon,
   PanelLeftIcon,
   PlusIcon,
   Trash2Icon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { NotificationBell } from "@/components/notification-bell";
 import {
   AuthDisplayLoggedIn,
   AuthDisplayLoggedOut,
 } from "@/components/auth/auth-display";
 import { UserMenu } from "@/components/auth/user-menu";
 import { VercelIcon } from "@/components/icons";
+import { KnowledgeBasePanel } from "@/components/chat/knowledge-base";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -116,6 +121,7 @@ export function ChatSidebar({
               <PanelLeftIcon className="size-4" />
             </Button>
           ) : null}
+          {viewer ? <NotificationBell /> : null}
         </div>
         <button
           className={cn(
@@ -204,6 +210,19 @@ export function ChatSidebar({
 
       <div className="border-t border-border px-2 py-3">
         {viewer ? (
+          <Link
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            href="/dashboard"
+          >
+            <LayoutDashboardIcon className="size-4" />
+            Dashboard
+          </Link>
+        ) : null}
+        {viewer ? <KnowledgeBaseSection /> : null}
+      </div>
+
+      <div className="border-t border-border px-2 py-3">
+        {viewer ? (
           <UserMenu viewer={viewer} />
         ) : isLoadingChats ? (
           <>
@@ -227,6 +246,33 @@ export function ChatSidebar({
         )}
       </div>
     </aside>
+  );
+}
+
+function KnowledgeBaseSection() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        className="flex h-8 items-center justify-between rounded-md px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <span className="inline-flex items-center gap-2">
+          <BookIcon className="size-4" />
+          Knowledge base
+        </span>
+        <ChevronDownIcon
+          className={cn("size-4 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open ? (
+        <div className="px-2">
+          <KnowledgeBasePanel />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -5,15 +5,26 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CheckIcon,
+  CopyIcon,
   Loader2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
+import { ProjectionCard } from "@/components/chat/tool/projection-card";
+import { TaskCard, TASK_TOOL_NAMES } from "@/components/chat/tool/task-card";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+function getMessageText(message: EveMessage) {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n");
+}
 
 const STREAM_TEXT_TICK_MS = 60;
 const STREAM_TEXT_CACHE_LIMIT = 40;
@@ -28,13 +39,17 @@ export type AgentInputResponse = {
 export function AgentMessage({
   canRespond,
   isStreaming,
+  isLast,
   message,
   onInputResponses,
+  onRetry,
 }: {
   readonly canRespond: boolean;
+  readonly isLast: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onRetry?: () => void;
 }) {
   const lastTextIndex = message.parts.reduce(
     (last, part, index) => (part.type === "text" ? index : last),
@@ -68,7 +83,71 @@ export function AgentMessage({
           showCaret={isStreaming && message.role === "assistant"}
         />
       </div>
+      {!isUser && !isStreaming ? (
+        <MessageActions
+          isLast={isLast}
+          message={message}
+          onRetry={onRetry}
+        />
+      ) : null}
     </article>
+  );
+}
+
+function MessageActions({
+  isLast,
+  message,
+  onRetry,
+}: {
+  readonly isLast: boolean;
+  readonly message: EveMessage;
+  readonly onRetry?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const text = getMessageText(message);
+
+  const handleCopy = useCallback(async () => {
+    if (!text) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }, [text]);
+
+  return (
+    <div className="ml-2 flex shrink-0 flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={copied ? "Copied" : "Copy message"}
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+            disabled={!text}
+            onClick={handleCopy}
+            type="button"
+          >
+            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left">{copied ? "Copied" : "Copy"}</TooltipContent>
+      </Tooltip>
+      {isLast && onRetry ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label="Retry"
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+              onClick={onRetry}
+              type="button"
+            >
+              <Loader2Icon className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Regenerate</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
   );
 }
 
@@ -371,6 +450,8 @@ function ToolGroup({
   const label = summarizeToolGroup(parts, status);
   const canExpand =
     parts.length > 1 ? parts.some(hasToolDetails) : hasToolDetails(parts[0]!);
+  const projectionCoverage = getProjectionCoverage(parts);
+  const taskParts = parts.filter(isTaskCardPart);
 
   useEffect(() => {
     if (shouldOpen) {
@@ -403,6 +484,14 @@ function ToolGroup({
           />
         ) : null}
       </CollapsibleTrigger>
+      {projectionCoverage ? <ProjectionCoverageLine coverage={projectionCoverage} /> : null}
+      {taskParts.map((part) => (
+        <TaskCard
+          key={part.toolCallId}
+          output={part.output}
+          toolName={resolveToolName(part)}
+        />
+      ))}
       {canExpand ? (
         <CollapsibleContent className="ml-2 border-l border-border/40 pl-3 pt-0.5 pb-1">
           {parts.length === 1 ? (
@@ -497,6 +586,10 @@ function ToolDetails({
   readonly part: EveDynamicToolPart;
 }) {
   const hasOutput = part.state === "output-available" || part.state === "output-error";
+
+  if (isProjectionCardPart(part)) {
+    return <ProjectionCard output={part.output} />;
+  }
 
   return (
     <div className="space-y-1.5">
@@ -800,6 +893,15 @@ function toolCategory(name: string) {
 
 function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(part)) {
   const name = resolveToolName(part);
+
+  if (PROJECTION_TOOL_NAMES.has(name)) {
+    return describeProjectionAction(part, status);
+  }
+
+  if (TASK_TOOL_NAMES.has(name)) {
+    return describeTaskAction(part, status);
+  }
+
   const normalized = normalizeToolName(name);
   const input = asRecord(part.input);
   const query = readString(input, ["query", "q", "search", "pattern", "prompt", "text"]);
@@ -857,6 +959,112 @@ function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(par
 function resolveToolName(part: EveDynamicToolPart) {
   const metadataName = part.toolMetadata?.eve?.name;
   return metadataName && metadataName !== "unknown" ? metadataName : part.toolName;
+}
+
+const PROJECTION_TOOL_NAMES = new Set(["build_projection", "navigate_projection"]);
+
+/** Projection tool calls with a successful scene render as a ProjectionCard. */
+function isProjectionCardPart(part: EveDynamicToolPart): boolean {
+  if (!PROJECTION_TOOL_NAMES.has(resolveToolName(part))) {
+    return false;
+  }
+  if (part.state !== "output-available") {
+    return false;
+  }
+  const out = part.output as { ok?: boolean; scene?: unknown } | undefined;
+  return Boolean(out && out.ok === true && out.scene);
+}
+
+/** Task tool calls with output render as a TaskCard (sempre visível). */
+function isTaskCardPart(part: EveDynamicToolPart): boolean {
+  return TASK_TOOL_NAMES.has(resolveToolName(part)) && part.state === "output-available";
+}
+
+// Narração viva da ação de projeção (backstage): "pedindo tal view", "navegando".
+function describeProjectionAction(part: EveDynamicToolPart, status: ToolStatus) {
+  const running = status === "running";
+  const input = asRecord(part.input);
+  const goal = readString(input, ["goal"]);
+  const op = readString(input, ["op"]);
+
+  if (resolveToolName(part) === "navigate_projection") {
+    const label = op ? op.replace(/^scene\./, "") : "ladder";
+    return running ? `Navegando a projeção: ${label}…` : `Navegou a projeção: ${label}`;
+  }
+
+  if (goal) {
+    return running ? `Pedindo projeção: ${truncateInline(goal, 60)}…` : `Projeção: ${truncateInline(goal, 60)}`;
+  }
+
+  return running ? "Pedindo projeção…" : "Projeção";
+}
+
+// Narração viva das tools de tarefa, em português.
+function describeTaskAction(part: EveDynamicToolPart, status: ToolStatus) {
+  const running = status === "running";
+  const name = resolveToolName(part);
+  const input = asRecord(part.input);
+  const title = readString(input, ["title"]);
+
+  switch (name) {
+    case "create_task":
+      if (running) return "Criando tarefa…";
+      return title ? `Criou tarefa: ${truncateInline(title, 60)}` : "Criou tarefa";
+    case "list_tasks":
+      return running ? "Listando tarefas…" : "Listou tarefas";
+    case "complete_task":
+      return running ? "Concluindo tarefa…" : "Concluiu tarefa";
+    case "verify_task":
+      return running ? "Verificando tarefa…" : "Verificou tarefa";
+    default:
+      return running ? "Processando tarefa…" : "Tarefa";
+  }
+}
+
+type ProjectionCoverage = {
+  visible: number;
+  total: number;
+  omitted: number;
+  partial: boolean;
+};
+
+// Honestidade de cobertura da última projeção do grupo — a única parte do
+// mecanismo que interessa ao humano (o quanto confiar na resposta).
+function getProjectionCoverage(parts: readonly EveDynamicToolPart[]): ProjectionCoverage | null {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]!;
+    if (!isProjectionCardPart(part)) {
+      continue;
+    }
+    const scene = (part.output as { scene?: Record<string, unknown> }).scene;
+    const loss = scene?.loss_accounting as
+      | { visible_count?: number; total_candidates?: number; omitted_count?: number }
+      | undefined;
+    if (!loss) {
+      continue;
+    }
+    const warnings = (scene?.warnings as Array<{ kind?: string }> | undefined) ?? [];
+    return {
+      visible: loss.visible_count ?? 0,
+      total: loss.total_candidates ?? 0,
+      omitted: loss.omitted_count ?? 0,
+      partial: warnings.some((w) => w.kind === "partial_source"),
+    };
+  }
+  return null;
+}
+
+function ProjectionCoverageLine({ coverage }: { readonly coverage: ProjectionCoverage }) {
+  const { visible, total, omitted, partial } = coverage;
+  const text =
+    total === 0
+      ? partial
+        ? "Sem dados: runtime de projeção ausente ou ledger vazio."
+        : "Projeção sem itens."
+      : `Baseado em ${visible} de ${total} ${total === 1 ? "item" : "itens"}` +
+        (omitted > 0 ? ` · ${omitted} não examinado${omitted === 1 ? "" : "s"}` : "");
+
+  return <p className="px-2 pt-0.5 text-xs text-muted-foreground/80">{text}</p>;
 }
 
 function formatToolName(name: string) {

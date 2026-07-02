@@ -37,3 +37,11 @@ export function VercelIcon({ className }: { readonly className?: string }) {
     </svg>
   );
 }
+
+export function LabIcon({ className }: { readonly className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} fill="currentColor" viewBox="0 0 24 24">
+      <path d="M9 3L7 3L7 7.5L2 16.5L2 19L4 21L20 21L22 19L22 16.5L17 7.5L17 3L15 3L15 7.5L9 7.5L9 3ZM6.5 16.5L9.5 11.5L14.5 11.5L17.5 16.5L6.5 16.5Z" />
+    </svg>
+  );
+}
