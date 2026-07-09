@@ -17,13 +17,9 @@
     "dev": "next dev",
     "start": "next start",
     "typecheck": "next typegen && tsgo --noEmit -p tsconfig.json",
-    "eve:build": "eve build",
-    "eve:dev": "eve dev"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "eve@0.8.3": "patches/eve@0.8.3.patch"
-    }
+    "build:eve": "eve build",
+    "dev:eve": "eve dev",
+    "start:eve": "eve start"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.0.2",
@@ -45,7 +41,7 @@
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "drizzle-orm": "0.45.1",
-    "eve": "latest",
+    "eve": "^0.22.1",
     "lucide-react": "1.16.0",
     "next": "16.2.6",
     "radix-ui": "1.4.3",
