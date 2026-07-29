@@ -1,6 +1,8 @@
 import type { SetupStatus } from "@/lib/chat/types";
 import { isDatabaseConfigured, isDatabaseSchemaReady } from "@/lib/db/client";
 
+const PASSWORD_ENV_KEY = "EVE_CHAT_PASSWORD";
+const MINIMUM_PASSWORD_LENGTH = 16;
 const AUTH_ENV_KEYS = [
   "BETTER_AUTH_SECRET",
   "NEXT_PUBLIC_VERCEL_APP_CLIENT_ID",
@@ -20,6 +22,10 @@ export function isAuthConfigured() {
   return AUTH_ENV_KEYS.every(hasEnv);
 }
 
+export function isPasswordConfigured() {
+  return (process.env.EVE_CHAT_PASSWORD?.trim().length ?? 0) >= MINIMUM_PASSWORD_LENGTH;
+}
+
 export function isRateLimitConfigured() {
   return RATE_LIMIT_ENV_GROUPS.some((group) => group.every(hasEnv));
 }
@@ -32,7 +38,9 @@ export function getInitialSetupStatus(): SetupStatus {
 
 export async function getSetupStatus(): Promise<SetupStatus> {
   const databaseConfigured = isDatabaseConfigured();
-  const databaseSchemaReady = databaseConfigured
+  const fullEnvironmentReady =
+    databaseConfigured && isAuthConfigured() && isRateLimitConfigured();
+  const databaseSchemaReady = fullEnvironmentReady
     ? await isDatabaseSchemaReady()
     : false;
 
@@ -51,23 +59,62 @@ function createSetupStatus({
   readonly databaseSchemaReady: boolean;
 }): SetupStatus {
   const databaseConfigured = isDatabaseConfigured();
-  const authReady = isAuthConfigured();
+  const vercelAuthReady = isAuthConfigured();
   const rateLimitReady = isRateLimitConfigured();
   const databaseReady = databaseConfigured && databaseSchemaReady;
-  const missing = [
-    ...(databaseConfigured ? [] : ["DATABASE_URL"]),
-    ...(databaseConfigured && !databaseSchemaReady ? ["database migrations"] : []),
-    ...AUTH_ENV_KEYS.filter((key) => !hasEnv(key)),
-    ...(rateLimitReady ? [] : ["UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN"]),
-  ];
+  const fullEnvironmentReady = databaseConfigured && vercelAuthReady && rateLimitReady;
+  const passwordReady = isPasswordConfigured();
+  const localDevReady = isLocalDevelopment();
+
+  if (fullEnvironmentReady) {
+    return {
+      appReady: databaseReady,
+      authMode: "vercel",
+      authReady: vercelAuthReady,
+      databaseConfigured,
+      databaseReady,
+      databaseSchemaReady,
+      missing: databaseSchemaReady ? [] : ["database migrations"],
+      rateLimitReady,
+      storageMode: "database",
+    };
+  }
+
+  if (passwordReady || localDevReady) {
+    return {
+      appReady: true,
+      authMode: passwordReady ? "password" : "local-dev",
+      authReady: true,
+      databaseConfigured,
+      databaseReady,
+      databaseSchemaReady,
+      missing: [],
+      rateLimitReady,
+      storageMode: "browser",
+    };
+  }
+
+  const password = process.env.EVE_CHAT_PASSWORD?.trim() ?? "";
+  const missing = password
+    ? [`${PASSWORD_ENV_KEY} must be at least ${MINIMUM_PASSWORD_LENGTH} characters`]
+    : [
+        PASSWORD_ENV_KEY,
+        "or DATABASE_URL, Better Auth/Vercel OAuth, and Upstash configuration",
+      ];
 
   return {
-    appReady: authReady && databaseReady && rateLimitReady,
-    authReady,
+    appReady: false,
+    authMode: "unconfigured",
+    authReady: false,
     databaseConfigured,
     databaseReady,
     databaseSchemaReady,
     missing,
     rateLimitReady,
+    storageMode: "browser",
   };
+}
+
+function isLocalDevelopment() {
+  return process.env.NODE_ENV === "development" && process.env.VERCEL !== "1";
 }

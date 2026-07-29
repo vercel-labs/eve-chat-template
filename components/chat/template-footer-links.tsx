@@ -12,7 +12,7 @@ Source template:
 https://github.com/vercel-labs/eve-chat-template
 
 Goal:
-Fork or clone the template into a new project, set it up end-to-end, customize the agent if I ask, verify it locally, deploy it to Vercel, and run production migrations.
+Fork or clone the template into a new project, customize the agent if I ask, verify it locally, and deploy the database-free starter to Vercel.
 
 Use the repository README, docs/setup-and-deploy.md, and scripts/setup.sh as the source of truth. Prefer the one-shot setup script when possible:
 
@@ -20,33 +20,13 @@ Use the repository README, docs/setup-and-deploy.md, and scripts/setup.sh as the
 2. Create/fork/clone a new project from vercel-labs/eve-chat-template.
 3. Install dependencies with pnpm install.
 4. Link the Vercel project with vercel link, using --scope <team-slug> if I provide one.
-5. Run ./scripts/setup.sh, or ./scripts/setup.sh --scope <team-slug> if scoped. This should provision Neon Postgres, provision Upstash Redis, create/set BETTER_AUTH_SECRET, create or reuse the Sign in with Vercel OAuth app, set NEXT_PUBLIC_VERCEL_APP_CLIENT_ID and VERCEL_APP_CLIENT_SECRET, set BETTER_AUTH_URL for production when available, optionally configure the Notion connector, pull .env.local, and run local database migrations.
-6. If any step requires browser/manual completion, pause and tell me exactly what to finish, then rerun the idempotent setup script.
-7. Start the app locally with pnpm dev and verify the chat page loads, setup checks pass, sign-in works, and sending a message creates a chat.
-8. Deploy to Vercel.
-9. After the first production deploy, run production migrations with vercel env run -e production -- pnpm db:migrate.
-10. Report the local URL, production URL, any secrets or dashboard steps I still need to complete, and any files you changed.
+5. Generate a strong EVE_CHAT_PASSWORD with at least 16 characters and add it to local and Vercel environments without printing it.
+6. Start the app locally with pnpm dev and verify the chat page loads, password sign-in works, sending a message creates a chat, and refreshing restores it from browser storage.
+7. Deploy to Vercel. Do not provision Neon, Upstash, a Vercel OAuth app, or run migrations unless I explicitly ask to upgrade to production persistence.
+8. Report the local URL, production URL, any dashboard steps I still need to complete, and any files you changed.
 
 Do not print secrets in the final answer. Ask before deleting or overwriting any existing project files.`;
-const DEPLOY_PRODUCTS = [
-  {
-    type: "integration",
-    protocol: "storage",
-    productSlug: "neon",
-    integrationSlug: "neon",
-  },
-  {
-    type: "integration",
-    protocol: "storage",
-    productSlug: "upstash-kv",
-    integrationSlug: "upstash",
-  },
-] as const;
-const DEPLOY_ENV_VARS = [
-  "BETTER_AUTH_SECRET",
-  "NEXT_PUBLIC_VERCEL_APP_CLIENT_ID",
-  "VERCEL_APP_CLIENT_SECRET",
-] as const;
+const DEPLOY_ENV_VARS = ["EVE_CHAT_PASSWORD"] as const;
 const DEPLOY_URL = (() => {
   const params = new URLSearchParams([
     ["project-name", "eve-chat-template"],
@@ -55,10 +35,9 @@ const DEPLOY_URL = (() => {
     ["env", DEPLOY_ENV_VARS.join(",")],
     [
       "envDescription",
-      "Neon provisions DATABASE_URL. Upstash Redis provisions rate-limit storage. Add Better Auth secret and Sign in with Vercel credentials. After deploy, run production migrations from the setup guide.",
+      "Choose a strong password with at least 16 characters to protect your agent.",
     ],
     ["envLink", `${GITHUB_URL}/blob/main/docs/setup-and-deploy.md`],
-    ["products", JSON.stringify(DEPLOY_PRODUCTS)],
   ]);
 
   return `https://vercel.com/new/clone?${params.toString()}`;

@@ -7,7 +7,7 @@ export async function GET() {
   const setupStatus = await getSetupStatus();
   const viewer = await getServerViewer(setupStatus);
   const initialChatsPage =
-    viewer && setupStatus.appReady
+    viewer && setupStatus.appReady && setupStatus.storageMode === "database"
       ? await listChatsPageByUser(viewer.id)
       : { items: [], nextCursor: null };
 

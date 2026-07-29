@@ -1,29 +1,34 @@
 # eve Chat Template
 
-A persisted Next.js chat template for [eve](https://beta.eve.dev), built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.
+A Next.js chat template for [eve](https://eve.dev) that starts with password access and browser-persisted chats, then upgrades to Sign in with Vercel, Neon, and Upstash when you need a production multi-user application.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=eve-chat-template&repository-name=eve-chat-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Ftree%2Fmain&env=BETTER_AUTH_SECRET%2CNEXT_PUBLIC_VERCEL_APP_CLIENT_ID%2CVERCEL_APP_CLIENT_SECRET&envDescription=Neon+provisions+DATABASE_URL.+Upstash+Redis+provisions+rate-limit+storage.+Add+Better+Auth+secret+and+Sign+in+with+Vercel+credentials.+After+deploy%2C+run+production+migrations+from+the+setup+guide.&envLink=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Fblob%2Fmain%2Fdocs%2Fsetup-and-deploy.md&products=%5B%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22neon%22%2C%22integrationSlug%22%3A%22neon%22%7D%2C%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22upstash-kv%22%2C%22integrationSlug%22%3A%22upstash%22%7D%5D)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=eve-chat-template&repository-name=eve-chat-template&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Ftree%2Fmain&env=EVE_CHAT_PASSWORD&envDescription=Choose+a+strong+password+with+at+least+16+characters+to+protect+your+agent.&envLink=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-chat-template%2Fblob%2Fmain%2Fdocs%2Fsetup-and-deploy.md)
 
 ## Quick Start
 
-Two ways to get going:
+Deploy the starter without provisioning a database or other Marketplace products:
 
-- **One-click:** use the **Deploy with Vercel** button above to clone and provision storage, then run migrations (see [Setup and Deployment](docs/setup-and-deploy.md#one-click-deploy)).
-- **Local script:** clone the repo and run the setup script. It links the project, provisions Neon, registers the Sign in with Vercel OAuth app (email scope + callbacks), sets the environment variables through the Vercel API, pulls them locally, runs migrations, and can optionally set up the Notion connector. If OAuth app registration isn't available it falls back to a guided manual flow.
+1. Click **Deploy with Vercel**.
+2. Enter a strong `EVE_CHAT_PASSWORD` with at least 16 characters.
+3. Open the deployed app and enter that password.
 
-```bash
-# Uses the linked project's team by default
-./scripts/setup.sh
+Chats and eve session cursors are stored in that browser. They are not shared across browsers or users.
+Starter mode is intended for one trusted operator: anyone with the password
+shares the same agent identity and connection grants.
 
-# Or target a specific team (also accepts a bare team slug)
-./scripts/setup.sh --scope <team-slug>
-```
+## Deployment Modes
 
-The `--scope` is optional; omit it to use the linked project's team. The script needs the `vercel` CLI, `node`, `pnpm`, and `openssl`. Prefer to do it by hand? Follow the sequential steps below, or the full [Setup and Deployment](docs/setup-and-deploy.md) guide.
+| Mode | Selected when | Authentication | Chat persistence |
+| --- | --- | --- | --- |
+| Starter | `EVE_CHAT_PASSWORD` is configured | Shared password and secure session cookie | Browser localStorage |
+| Production | Neon, Upstash, and all Sign in with Vercel variables are configured | Sign in with Vercel | Neon |
+| Local development | Neither mode is configured and `next dev` is running locally | Local development identity | Browser localStorage |
+
+Production mode takes precedence when its complete environment is present. The app fails closed in a production deployment when neither mode is configured. See [Setup and Deployment](docs/setup-and-deploy.md) for the upgrade path.
 
 ## Getting Started
 
-For the full local setup, storage provisioning, Sign in with Vercel credentials, and production deploy flow, see [Setup and Deployment](docs/setup-and-deploy.md). For the runtime architecture, streaming model, persistence flow, and extension points, see [How the Chatbot Works](docs/how-the-chatbot-works.md).
+For the starter and production setup flows, see [Setup and Deployment](docs/setup-and-deploy.md). For the runtime architecture, streaming model, persistence flow, and extension points, see [How the Chatbot Works](docs/how-the-chatbot-works.md).
 
 Install dependencies with pnpm:
 
@@ -31,29 +36,26 @@ Install dependencies with pnpm:
 pnpm install
 ```
 
-Link the Vercel project and pull environment variables:
+Run locally without additional services:
 
 ```bash
-vercel link
+pnpm dev
 ```
 
-Provision storage with the [Vercel CLI integration commands](https://vercel.com/docs/cli/integration):
+To require the same password locally, put this in `.env.local`:
 
 ```bash
-# Required: persisted chat, auth, eve session state, and message snapshots
-vercel integration add neon
-
-# Required: Redis-backed rate limiting
-vercel integration add upstash
+EVE_CHAT_PASSWORD=<at-least-16-characters>
 ```
 
-Follow the prompts to connect each resource to the linked project. Then pull the generated environment variables locally:
+To upgrade the linked project to production mode, run the setup script. It provisions Neon and Upstash, registers Sign in with Vercel, pulls environment variables, and runs migrations:
 
 ```bash
-vercel env pull .env.local --yes
+./scripts/setup.sh
+# Or: ./scripts/setup.sh --scope <team-slug>
 ```
 
-Required environment variables:
+Production mode requires:
 
 ```bash
 DATABASE_URL=
@@ -66,7 +68,7 @@ KV_REST_API_URL=
 KV_REST_API_TOKEN=
 ```
 
-Optional environment variables:
+Other optional environment variables:
 
 ```bash
 # Override the app origin for custom production domains.
@@ -101,7 +103,7 @@ vercel connect attach <connector-uid> --yes
 vercel env pull .env.local
 ```
 
-Create the database tables:
+Production mode only: create the database tables:
 
 ```bash
 pnpm db:migrate
@@ -122,11 +124,12 @@ pnpm dev
 ## What Is Included
 
 - Text chat with an eve agent through same-origin `/eve/v1/*` routes
-- Better Auth sign-in with Vercel
-- Mandatory Neon-backed chat history
-- Mandatory Upstash Redis rate limiting for authenticated chat sends
-- Drizzle schema and migrations under `lib/db`
-- Saved eve session cursors and event snapshots
+- Password access with browser-backed chat history by default
+- Optional Better Auth sign-in with Vercel
+- Optional Neon-backed cross-device chat history
+- Optional Upstash Redis rate limiting in production mode
+- Drizzle schema and migrations for production mode under `lib/db`
+- Saved eve session cursors and event snapshots in either storage mode
 - Sidebar history with delete and new-chat actions
 - Vercel Connect-backed Notion, Linear, and Sentry MCP connections
 - Vercel Connect-backed Slack channel route at `/eve/v1/slack`

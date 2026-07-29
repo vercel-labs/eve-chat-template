@@ -6,7 +6,7 @@ import { getSetupStatus } from "@/lib/setup";
 export async function GET(request: Request) {
   const setupStatus = await getSetupStatus();
 
-  if (!setupStatus.appReady) {
+  if (!setupStatus.appReady || setupStatus.storageMode !== "database") {
     return NextResponse.json({ chats: [], nextCursor: null });
   }
 

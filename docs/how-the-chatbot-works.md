@@ -6,9 +6,9 @@ state lives, how messages stream, and how to safely change the chat experience.
 
 The short version: this is not a generic stateless chat UI. The browser talks to
 an eve agent through same-origin `/eve/v1/*` routes, persists eve stream events
-to Postgres as they arrive, keeps an eve session cursor so interrupted streams
-can resume, and uses a static Next.js shell so the sidebar and composer do not
-thrash during route navigation.
+and the eve session cursor in either browser storage or Postgres, and uses a
+static Next.js shell so the sidebar and composer do not thrash during route
+navigation.
 
 ## Main Pieces
 
@@ -43,18 +43,21 @@ Important files:
 | `components/chat/integrations-menu.tsx` | Per-turn connection toggle UI. |
 | `app/actions/chat.ts` | Server actions for chat creation, persistence, pending state, skip auth, and rate checks. |
 | `app/api/chats/route.ts` | Paginated chat history endpoint. |
+| `lib/chat/local-store.ts` | Versioned browser storage for starter-mode chats and eve session cursors. |
+| `lib/chat/persistence-client.ts` | Routes client persistence calls to browser or database storage. |
 | `lib/db/schema.ts` | Drizzle tables for Better Auth, chats, and chat events. |
 | `lib/db/queries.ts` | Chat list, chat load, event save, snapshot save, and delete queries. |
-| `lib/setup.ts` | Setup readiness checks for Neon, migrations, auth, and Redis. |
+| `lib/setup.ts` | Selects starter, local development, or production mode and validates readiness. |
 | `lib/auth.ts` | Better Auth configuration with Sign in with Vercel. |
-| `lib/eve-auth.ts` | Converts a Better Auth viewer into an eve channel principal. |
+| `lib/password-auth.ts` | Shared-password verification and stateless signed session cookies. |
+| `lib/eve-auth.ts` | Converts password or Better Auth sessions into eve channel principals. |
 | `lib/rate-limit.ts` | Upstash Redis based fixed-window rate limiting. |
 
 ## Runtime Model
 
 There are two related but separate concepts:
 
-1. A **local app chat**, represented by a row in the `chat` table.
+1. A **local app chat**, represented by a browser-storage record or a row in the `chat` table.
 2. An **eve session**, represented by eve's `SessionState` and remote session
    stream.
 
@@ -63,19 +66,20 @@ and persisted event history. The eve session is the durable conversation state
 that eve uses to continue, wait for authorization, resume streams, and accept
 follow-up input.
 
-The app stores eve session state on the chat row:
+Production mode stores eve session state on the chat row:
 
 ```ts
 chat.eveSession: SessionState | null
 ```
 
-The app stores eve stream events in ordered rows:
+Production mode stores eve stream events in ordered rows:
 
 ```ts
 chat_event.eventIndex: number
 chat_event.event: HandleMessageStreamEvent
 ```
 
+Starter mode keeps the same two values in a versioned localStorage record.
 Those two pieces are intentionally separate. The `eveSession.streamIndex` tells
 eve where to resume from in the remote session stream. The local
 `chat_event.eventIndex` tells Postgres how to order the event log for rendering.
@@ -110,8 +114,11 @@ without waiting for the database or auth session. Then `ResolvedChatBootstrap`
 fetches:
 
 - setup readiness from `getSetupStatus()`
-- the Better Auth viewer from `getServerViewer(setupStatus)`
-- the first page of chat history from `listChatsPageByUser(viewer.id)`
+- the password, local-development, or Better Auth viewer from `getServerViewer(setupStatus)`
+- the first page of database chat history in production mode
+
+In starter mode, the client reads sidebar history from browser storage after
+the viewer resolves.
 
 It passes that data through `AgentChatBootstrapSync`, which dispatches a browser
 event. `AgentChatShell` listens for that event and merges the real viewer,
@@ -132,7 +139,7 @@ shell first:
 </SessionChatPage>
 ```
 
-`ExistingChat` loads the active chat from Postgres and emits it through
+`ExistingChat` loads the active chat from Postgres in production mode and emits it through
 `AgentChatRouteSync`. `SessionChatPage` listens for that sync event and then
 passes the loaded `ActiveChat` into `AgentChatSession`.
 
@@ -594,7 +601,12 @@ development, connectors created with `--name notion`, `--name linear`, and
 
 ## Auth
 
-The app uses Better Auth with Sign in with Vercel.
+Starter mode uses a shared deployment password. The login route verifies
+`EVE_CHAT_PASSWORD` and issues a signed, HTTP-only, same-site cookie without a
+database. `lib/session.ts` and `lib/eve-auth.ts` verify the same cookie for the
+Next.js UI and eve route boundary.
+
+Production mode uses Better Auth with Sign in with Vercel.
 
 `lib/auth-url.ts` resolves the base app URL in this order:
 
@@ -612,9 +624,11 @@ The app uses Better Auth with Sign in with Vercel.
 - `/auth/error` as the error page
 
 `lib/session.ts` returns a safe `Viewer` object for server components. It returns
-`null` if setup is incomplete so auth failures do not cascade into the chat UI.
+the shared starter viewer, local development viewer, or Vercel user depending
+on the selected mode.
 
-`lib/eve-auth.ts` adapts the Better Auth session into an eve channel principal:
+`lib/eve-auth.ts` adapts the selected app session into an eve channel principal.
+Production mode uses:
 
 ```ts
 {
@@ -631,8 +645,9 @@ The app uses Better Auth with Sign in with Vercel.
 `agent/channels/eve.ts` allows:
 
 - `betterAuthEveAuth`
-- `localDev()`
+- `passwordEveAuth`
 - `vercelOidc()`
+- `localDev()`
 
 That lets the same channel work locally, in authenticated browser sessions, and
 with Vercel OIDC contexts.
@@ -644,23 +659,27 @@ with Vercel OIDC contexts.
 ```ts
 type SetupStatus = {
   appReady: boolean;
+  authMode: "local-dev" | "password" | "unconfigured" | "vercel";
   authReady: boolean;
   databaseConfigured: boolean;
   databaseReady: boolean;
   databaseSchemaReady: boolean;
   missing: readonly string[];
   rateLimitReady: boolean;
+  storageMode: "browser" | "database";
 };
 ```
 
-The app is ready only when:
+The starter is ready when `EVE_CHAT_PASSWORD` has at least 16 characters. Local
+development is ready on loopback without configuration. Production mode is
+selected when all of these are configured:
 
 - `DATABASE_URL` exists
 - database migrations have created the expected tables
 - Better Auth env vars are present
 - Upstash Redis env vars are present
 
-The database schema check asks Postgres whether these tables exist:
+Production mode then checks whether these Postgres tables exist:
 
 - `account`
 - `chat`
@@ -679,7 +698,7 @@ Disabled composers should always provide a reason through tooltip text.
 
 ## Rate Limiting
 
-Rate limiting uses Upstash Redis in `lib/rate-limit.ts`.
+Production-mode rate limiting uses Upstash Redis in `lib/rate-limit.ts`.
 
 The app supports either current Upstash env names:
 
@@ -775,10 +794,9 @@ That keeps errors from pushing the composer or chat body around.
 
 Common setup errors:
 
-- missing `DATABASE_URL`
-- migrations not run
-- missing Better Auth secret or Vercel OAuth env vars
-- missing Upstash Redis env vars
+- missing or short `EVE_CHAT_PASSWORD` in starter mode
+- incomplete Neon, Better Auth/Vercel OAuth, or Upstash configuration
+- production migrations not run
 - Vercel OAuth app missing the `email` scope
 
 Common stream errors:

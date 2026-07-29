@@ -35,9 +35,13 @@ async function ExistingChat({
   const setupStatus = await getSetupStatus();
   const viewer = await getServerViewer(setupStatus);
   const appReady = setupStatus.appReady;
-  const activeChat = viewer && appReady ? await getChatForUser(chatId, viewer.id) : null;
+  const usesDatabase = setupStatus.storageMode === "database";
+  const activeChat =
+    viewer && appReady && usesDatabase
+      ? await getChatForUser(chatId, viewer.id)
+      : null;
 
-  if (viewer && appReady && !activeChat) {
+  if (viewer && appReady && usesDatabase && !activeChat) {
     notFound();
   }
 

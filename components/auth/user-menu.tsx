@@ -13,11 +13,33 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
-import type { Viewer } from "@/lib/chat/types";
+import type { AuthMode, Viewer } from "@/lib/chat/types";
 
-export function UserMenu({ viewer }: { readonly viewer: Viewer }) {
+export function UserMenu({
+  authMode,
+  viewer,
+}: {
+  readonly authMode: AuthMode;
+  readonly viewer: Viewer;
+}) {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+
+  if (authMode === "local-dev") {
+    return (
+      <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
+        <UserAvatar viewer={viewer} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-foreground">
+            Local development
+          </span>
+          <span className="block truncate text-[11px] text-muted-foreground">
+            Browser storage
+          </span>
+        </span>
+      </div>
+    );
+  }
 
   return (
     <DropdownMenu>
@@ -55,8 +77,16 @@ export function UserMenu({ viewer }: { readonly viewer: Viewer }) {
             }
 
             setSigningOut(true);
-            void authClient
-              .signOut()
+            const signOut =
+              authMode === "password"
+                ? fetch("/api/password-auth/logout", { method: "POST" }).then((response) => {
+                    if (!response.ok) {
+                      throw new Error("Failed to sign out.");
+                    }
+                  })
+                : authClient.signOut().then(() => undefined);
+
+            void signOut
               .then(() => {
                 router.replace("/");
                 router.refresh();

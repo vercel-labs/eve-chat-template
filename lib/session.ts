@@ -1,7 +1,15 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import type { SetupStatus, Viewer } from "@/lib/chat/types";
+import { getPasswordSessionFromHeaders } from "@/lib/password-auth";
 import { getSetupStatus } from "@/lib/setup";
+
+const PASSWORD_VIEWER: Viewer = {
+  email: "local@eve.dev",
+  id: "eve-chat-user",
+  image: null,
+  name: "eve user",
+};
 
 export async function getServerViewer(setupStatus?: SetupStatus): Promise<Viewer | null> {
   const status = setupStatus ?? (await getSetupStatus());
@@ -10,9 +18,23 @@ export async function getServerViewer(setupStatus?: SetupStatus): Promise<Viewer
     return null;
   }
 
+  const requestHeaders = await headers();
+
+  if (status.authMode === "local-dev") {
+    return PASSWORD_VIEWER;
+  }
+
+  if (status.authMode === "password") {
+    return getPasswordSessionFromHeaders(requestHeaders) ? PASSWORD_VIEWER : null;
+  }
+
+  if (status.authMode !== "vercel") {
+    return null;
+  }
+
   try {
     const session = await auth.api.getSession({
-      headers: await headers(),
+      headers: requestHeaders,
     });
 
     if (!session?.user) {

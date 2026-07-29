@@ -1,12 +1,12 @@
 # Setup and Deployment
 
-This guide covers local development, one-click deployment, production migrations, Sign in with Vercel, and optional Notion connections for eve Chat Template.
+This guide covers the database-free starter, local development, the production persistence upgrade, Sign in with Vercel, and optional connections.
 
 ## Prerequisites
 
 - Node.js 24 or newer
 - pnpm through Corepack
-- A Vercel account with access to the team that owns the project
+- A Vercel account
 - Vercel CLI, either installed globally or run with `pnpm dlx`
 
 ```bash
@@ -19,26 +19,34 @@ The commands below use `vercel`. If you do not have a global install, replace `v
 
 ## One-Click Deploy
 
-The README deploy button provisions the required storage products through Vercel Marketplace:
-
-- Neon Postgres, which provides `DATABASE_URL`
-- Upstash Redis, which provides rate-limit storage env vars
-
-The deploy flow asks for:
+The README deploy button creates a working starter without Marketplace products or migrations. It asks for:
 
 ```bash
-BETTER_AUTH_SECRET=
-NEXT_PUBLIC_VERCEL_APP_CLIENT_ID=
-VERCEL_APP_CLIENT_SECRET=
+EVE_CHAT_PASSWORD=
 ```
 
-After the first production deployment is created, run migrations against the production environment:
+Use a strong value with at least 16 characters. The app exchanges it for a secure, HTTP-only session cookie. Chats and eve session cursors are stored in the current browser's localStorage, so history does not follow the user to another browser.
+
+Starter mode is for one trusted operator. Everyone who knows the password shares
+the same eve principal and any user-scoped connection grants. Upgrade to
+production mode before giving independent users access.
+
+If `EVE_CHAT_PASSWORD` is absent or too short and the full production environment is not configured, the deployment fails closed and does not allow chat requests.
+
+## Production Persistence Upgrade
+
+Configure all of Neon, Upstash, and Sign in with Vercel to switch the same codebase into production mode. Production mode uses Vercel identity, database-backed per-user history, and distributed rate limiting. The setup script automates this path:
+
+```bash
+./scripts/setup.sh
+# Or: ./scripts/setup.sh --scope <team-slug>
+```
+
+Once all production environment variables are present, production mode takes precedence over `EVE_CHAT_PASSWORD`. Run migrations after the first production deployment:
 
 ```bash
 vercel env run -e production -- pnpm db:migrate
 ```
-
-This uses Vercel production env vars directly and avoids copying sensitive Neon values into your terminal or local files.
 
 ## Local Project Link
 
@@ -54,9 +62,9 @@ If you are working in a team, pass the team scope:
 vercel link --scope <team-slug>
 ```
 
-## Required Storage
+## Production Storage
 
-Neon and Upstash Redis are required for the template.
+Neon and Upstash Redis are required only for production mode.
 
 Provision Neon:
 

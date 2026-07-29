@@ -12,13 +12,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { deleteChatAction } from "@/app/actions/chat";
 import {
   CHAT_BOOTSTRAP_SYNC_EVENT,
   type ChatBootstrapSyncDetail,
 } from "@/app/_components/agent-chat-events";
 import {
   ChatShellProvider,
+  useChatShell,
   type EnabledConnections,
 } from "@/app/_components/chat-shell-context";
 import { AuthDisplayLoggedOut } from "@/components/auth/auth-display";
@@ -32,6 +32,10 @@ import {
   SIDEBAR_COOKIE_MAX_AGE,
   SIDEBAR_COOKIE_NAME,
 } from "@/lib/chat/sidebar-state";
+import {
+  deleteClientChat,
+  listClientChats,
+} from "@/lib/chat/persistence-client";
 import type { ChatListItem, SetupStatus, Viewer } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
@@ -153,7 +157,7 @@ export function AgentChatShell({
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
       try {
-        await deleteChatAction(chatId);
+        await deleteClientChat(setupStatusState.storageMode, chatId);
         removeChat(chatId);
 
         if (activeChatIdRef.current === chatId) {
@@ -164,13 +168,13 @@ export function AgentChatShell({
         // errors are shown by the chat surface where the user is working.
       }
     },
-    [removeChat, startNewChat],
+    [removeChat, setupStatusState.storageMode, startNewChat],
   );
 
   const loadMoreChats = useCallback(async () => {
     const cursor = cursorRef.current;
 
-    if (!cursor || loadingMore) {
+    if (!cursor || loadingMore || setupStatusState.storageMode !== "database") {
       return;
     }
 
@@ -201,7 +205,7 @@ export function AgentChatShell({
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore]);
+  }, [loadingMore, setupStatusState.storageMode]);
 
   const setBootstrapData = useCallback(
     ({
@@ -217,10 +221,16 @@ export function AgentChatShell({
     }) => {
       setSetupStatusState(incomingSetupStatus);
       setViewerState(incomingViewer);
-      setHistory((items) => (incomingViewer ? mergeChatHistory(chats, items) : []));
-      setNextCursor(incomingNextCursor);
+      const usesBrowserStorage = incomingSetupStatus.storageMode === "browser";
+      const nextChats =
+        incomingViewer && usesBrowserStorage
+          ? listClientChats(incomingSetupStatus.storageMode)
+          : chats;
+
+      setHistory((items) => (incomingViewer ? mergeChatHistory(nextChats, items) : []));
+      setNextCursor(usesBrowserStorage ? null : incomingNextCursor);
       setHistoryLoading(false);
-      cursorRef.current = incomingNextCursor;
+      cursorRef.current = usesBrowserStorage ? null : incomingNextCursor;
     },
     [],
   );
@@ -290,10 +300,16 @@ export function AgentChatShell({
   );
   const loggedOutAuthActions = historyLoading ? (
     <AuthDisplayLoggedOut>
-      <AuthTopActions onSignIn={() => requestSignIn()} />
+      <AuthTopActions
+        authMode={setupStatusState.authMode}
+        onSignIn={() => requestSignIn()}
+      />
     </AuthDisplayLoggedOut>
   ) : (
-    <AuthTopActions onSignIn={() => requestSignIn()} />
+    <AuthTopActions
+      authMode={setupStatusState.authMode}
+      onSignIn={() => requestSignIn()}
+    />
   );
   const topRightActions = (
     <div className="pointer-events-auto mt-1 flex min-w-0 items-center justify-end gap-1.5">
@@ -380,6 +396,7 @@ export function AgentChatShell({
         ) : null}
 
         <SignInModal
+          authMode={setupStatusState.authMode}
           callbackPath={signInCallbackPath}
           disabled={!setupReady}
           onBeforeSignIn={() => {
@@ -423,8 +440,12 @@ function setSidebarDocumentHint(open: boolean) {
 
 function ChatRouteShareButton() {
   const pathname = usePathname();
+  const { setupStatus } = useChatShell();
 
-  if (!pathname.startsWith("/chat/")) {
+  if (
+    !pathname.startsWith("/chat/") ||
+    setupStatus.storageMode === "browser"
+  ) {
     return null;
   }
 
@@ -483,7 +504,15 @@ function ShareChatButton() {
   );
 }
 
-function AuthTopActions({ onSignIn }: { readonly onSignIn: () => void }) {
+function AuthTopActions({
+  authMode,
+  onSignIn,
+}: {
+  readonly authMode: SetupStatus["authMode"];
+  readonly onSignIn: () => void;
+}) {
+  const usesPassword = authMode === "password";
+
   return (
     <div className="flex max-w-[calc(100vw-4rem)] items-center gap-1.5">
       <Button
@@ -492,15 +521,17 @@ function AuthTopActions({ onSignIn }: { readonly onSignIn: () => void }) {
         type="button"
         variant="outline"
       >
-        Log In
+        {usesPassword ? "Sign in" : "Log In"}
       </Button>
-      <Button
-        className="h-8 rounded-md bg-foreground px-3 text-sm font-medium text-background hover:bg-foreground/90"
-        onClick={onSignIn}
-        type="button"
-      >
-        Sign Up
-      </Button>
+      {usesPassword ? null : (
+        <Button
+          className="h-8 rounded-md bg-foreground px-3 text-sm font-medium text-background hover:bg-foreground/90"
+          onClick={onSignIn}
+          type="button"
+        >
+          Sign Up
+        </Button>
+      )}
     </div>
   );
 }

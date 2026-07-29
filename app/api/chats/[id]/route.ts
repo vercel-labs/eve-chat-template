@@ -9,7 +9,7 @@ export async function GET(
 ) {
   const setupStatus = await getSetupStatus();
 
-  if (!setupStatus.appReady) {
+  if (!setupStatus.appReady || setupStatus.storageMode !== "database") {
     return NextResponse.json({ chat: null }, { status: 503 });
   }
 
