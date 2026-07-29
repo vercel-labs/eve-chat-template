@@ -670,8 +670,9 @@ type SetupStatus = {
 };
 ```
 
-The starter is ready when `EVE_CHAT_PASSWORD` has at least 16 characters. Local
-development is ready on loopback without configuration. Production mode is
+The starter is ready when `EVE_CHAT_PASSWORD` is non-empty. A strong value with
+16+ characters is recommended. Local development is ready on loopback without
+configuration. Production mode is
 selected when all of these are configured:
 
 - `DATABASE_URL` exists

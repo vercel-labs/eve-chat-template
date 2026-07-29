@@ -20,7 +20,7 @@ Use the repository README, docs/setup-and-deploy.md, and scripts/setup.sh as the
 2. Create/fork/clone a new project from vercel-labs/eve-chat-template.
 3. Install dependencies with pnpm install.
 4. Link the Vercel project with vercel link, using --scope <team-slug> if I provide one.
-5. Generate a strong EVE_CHAT_PASSWORD with at least 16 characters and add it to local and Vercel environments without printing it.
+5. Generate a strong EVE_CHAT_PASSWORD (16+ characters recommended) and add it to local and Vercel environments without printing it.
 6. Start the app locally with pnpm dev and verify the chat page loads, password sign-in works, sending a message creates a chat, and refreshing restores it from browser storage.
 7. Deploy to Vercel. Do not provision Neon, Upstash, a Vercel OAuth app, or run migrations unless I explicitly ask to upgrade to production persistence.
 8. Report the local URL, production URL, any dashboard steps I still need to complete, and any files you changed.
@@ -35,7 +35,7 @@ const DEPLOY_URL = (() => {
     ["env", DEPLOY_ENV_VARS.join(",")],
     [
       "envDescription",
-      "Choose a strong password with at least 16 characters to protect your agent.",
+      "Choose a strong password to protect your agent (16+ characters recommended).",
     ],
     ["envLink", `${GITHUB_URL}/blob/main/docs/setup-and-deploy.md`],
   ]);

@@ -2,7 +2,6 @@ import type { SetupStatus } from "@/lib/chat/types";
 import { isDatabaseConfigured, isDatabaseSchemaReady } from "@/lib/db/client";
 
 const PASSWORD_ENV_KEY = "EVE_CHAT_PASSWORD";
-const MINIMUM_PASSWORD_LENGTH = 16;
 const AUTH_ENV_KEYS = [
   "BETTER_AUTH_SECRET",
   "NEXT_PUBLIC_VERCEL_APP_CLIENT_ID",
@@ -23,7 +22,7 @@ export function isAuthConfigured() {
 }
 
 export function isPasswordConfigured() {
-  return (process.env.EVE_CHAT_PASSWORD?.trim().length ?? 0) >= MINIMUM_PASSWORD_LENGTH;
+  return Boolean(process.env.EVE_CHAT_PASSWORD?.trim());
 }
 
 export function isRateLimitConfigured() {
@@ -94,14 +93,6 @@ function createSetupStatus({
     };
   }
 
-  const password = process.env.EVE_CHAT_PASSWORD?.trim() ?? "";
-  const missing = password
-    ? [`${PASSWORD_ENV_KEY} must be at least ${MINIMUM_PASSWORD_LENGTH} characters`]
-    : [
-        PASSWORD_ENV_KEY,
-        "or DATABASE_URL, Better Auth/Vercel OAuth, and Upstash configuration",
-      ];
-
   return {
     appReady: false,
     authMode: "unconfigured",
@@ -109,7 +100,10 @@ function createSetupStatus({
     databaseConfigured,
     databaseReady,
     databaseSchemaReady,
-    missing,
+    missing: [
+      PASSWORD_ENV_KEY,
+      "or DATABASE_URL, Better Auth/Vercel OAuth, and Upstash configuration",
+    ],
     rateLimitReady,
     storageMode: "browser",
   };
