@@ -47,7 +47,7 @@ export function verifyPasswordSessionToken(token: string | undefined, now = Date
 
   const expected = sign(`${version}.${expiresAt}`);
 
-  return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  return timingSafeEqual(hash(signature), hash(expected));
 }
 
 export function getPasswordSessionFromHeaders(headers: Headers) {
