@@ -33,7 +33,7 @@ export function SignInModal({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-sm">
-        <DialogHeader className="items-center text-center">
+        <DialogHeader className="items-center text-center sm:text-center">
           <div className="mb-2 flex size-10 items-center justify-center rounded-full border border-border bg-muted">
             {usesPassword ? (
               <LockKeyholeIcon className="size-4 text-foreground" />

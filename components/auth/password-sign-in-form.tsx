@@ -52,20 +52,16 @@ export function PasswordSignInForm({
 
   return (
     <form className="space-y-3" onSubmit={handleSubmit}>
-      <div className="space-y-1.5">
-        <label className="text-sm font-medium" htmlFor="eve-chat-password">
-          Password
-        </label>
-        <Input
-          autoComplete="current-password"
-          autoFocus
-          disabled={pending}
-          id="eve-chat-password"
-          onChange={(event) => setPassword(event.target.value)}
-          type="password"
-          value={password}
-        />
-      </div>
+      <Input
+        aria-label="Password"
+        autoComplete="current-password"
+        autoFocus
+        disabled={pending}
+        id="eve-chat-password"
+        onChange={(event) => setPassword(event.target.value)}
+        type="password"
+        value={password}
+      />
       {error ? (
         <p aria-live="polite" className="text-sm text-destructive" role="alert">
           {error}
