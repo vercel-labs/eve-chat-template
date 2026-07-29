@@ -204,7 +204,7 @@ export function ChatSidebar({
 
       <div className="border-t border-border px-2 py-3">
         {viewer ? (
-          <UserMenu viewer={viewer} />
+          <UserMenu authMode={setupStatus.authMode} viewer={viewer} />
         ) : isLoadingChats ? (
           <>
             <AuthDisplayLoggedIn>

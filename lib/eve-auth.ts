@@ -1,9 +1,12 @@
 import type { AuthFn } from "eve/channels/auth";
 import { auth } from "@/lib/auth";
-import { isAppConfigured } from "@/lib/setup";
+import { getPasswordSessionFromHeaders } from "@/lib/password-auth";
+import { getSetupStatus } from "@/lib/setup";
 
 export const betterAuthEveAuth: AuthFn<Request> = async (request) => {
-  if (!(await isAppConfigured())) {
+  const setupStatus = await getSetupStatus();
+
+  if (!setupStatus.appReady || setupStatus.authMode !== "vercel") {
     return null;
   }
 
@@ -25,5 +28,29 @@ export const betterAuthEveAuth: AuthFn<Request> = async (request) => {
     principalId: session.user.id,
     principalType: "user",
     subject: session.user.email,
+  };
+};
+
+export const passwordEveAuth: AuthFn<Request> = async (request) => {
+  const setupStatus = await getSetupStatus();
+
+  if (
+    !setupStatus.appReady ||
+    setupStatus.authMode !== "password" ||
+    !getPasswordSessionFromHeaders(request.headers)
+  ) {
+    return null;
+  }
+
+  return {
+    attributes: {
+      email: "local@eve.dev",
+      name: "eve user",
+    },
+    authenticator: "password",
+    issuer: "eve-chat-template",
+    principalId: "eve-chat-user",
+    principalType: "user",
+    subject: "eve-chat-user",
   };
 };

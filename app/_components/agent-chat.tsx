@@ -22,16 +22,6 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  checkSendLimitAction,
-  appendChatEventAction,
-  clearChatPendingMessageAction,
-  createChatAction,
-  markChatPendingMessageAction,
-  saveChatSnapshotAction,
-  saveChatSessionStateAction,
-  skipChatAuthorizationAction,
-} from "@/app/actions/chat";
-import {
   useChatShell,
   type EnabledConnections,
 } from "@/app/_components/chat-shell-context";
@@ -46,6 +36,16 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isChatTurnSettledEvent } from "@/lib/chat/events";
 import { getChatMessageLengthError } from "@/lib/chat/limits";
+import {
+  appendClientChatEvent,
+  checkClientSendLimit,
+  clearClientChatPendingMessage,
+  createClientChat,
+  markClientChatPendingMessage,
+  saveClientChatSession,
+  saveClientChatSnapshot,
+  skipClientChatAuthorization,
+} from "@/lib/chat/persistence-client";
 import type { ActiveChat, SetupStatus, Viewer } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
@@ -722,6 +722,7 @@ export function AgentChatSession({
     onSessionStarted: (session) => onSessionStartedRef.current(session),
   });
   const isSetupReady = setupStatus.appReady;
+  const storageMode = setupStatus.storageMode;
   const router = useRouter();
 
   const startFinalizingTurn = useCallback(() => {
@@ -775,7 +776,7 @@ export function AgentChatSession({
           localEventsRef.current,
         );
 
-        await saveChatSnapshotAction({
+        await saveClientChatSnapshot(storageMode, {
           chatId,
           events,
           session,
@@ -810,6 +811,7 @@ export function AgentChatSession({
       onPendingUserMessageSettled,
       stopFinalizingTurn,
       touchChat,
+      storageMode,
       viewer,
     ],
   );
@@ -843,7 +845,7 @@ export function AgentChatSession({
       const eventIndex = eventIndexRef.current;
       eventIndexRef.current += 1;
 
-      void appendChatEventAction({
+      void appendClientChatEvent(storageMode, {
         chatId,
         event: displayEvent,
         eventIndex,
@@ -853,7 +855,7 @@ export function AgentChatSession({
         );
       });
     },
-    [stopFinalizingTurn, viewer],
+    [stopFinalizingTurn, storageMode, viewer],
   );
 
   const persistSessionState = useCallback(
@@ -865,7 +867,7 @@ export function AgentChatSession({
       }
 
       try {
-        await saveChatSessionStateAction({
+        await saveClientChatSession(storageMode, {
           chatId,
           session,
         });
@@ -875,7 +877,7 @@ export function AgentChatSession({
         );
       }
     },
-    [viewer],
+    [storageMode, viewer],
   );
 
   onSessionStartedRef.current = persistSessionState;
@@ -971,7 +973,7 @@ export function AgentChatSession({
 
   const prepareSend = useCallback(
     async (firstMessage: string) => {
-      const limit = await checkSendLimitAction({ message: firstMessage });
+      const limit = await checkClientSendLimit(storageMode, { message: firstMessage });
 
       if (!limit.allowed) {
         setClientError(`${limit.message} Retry in ${limit.retryAfter}s.`);
@@ -979,7 +981,9 @@ export function AgentChatSession({
       }
 
       if (!activeChatIdRef.current) {
-        const created = await createChatAction({ pendingUserMessage: firstMessage });
+        const created = await createClientChat(storageMode, {
+          pendingUserMessage: firstMessage,
+        });
 
         touchChat(created);
         setActiveChatId(created.id);
@@ -995,7 +999,7 @@ export function AgentChatSession({
 
       return true;
     },
-    [router, setShellActiveChatId, touchChat],
+    [router, setShellActiveChatId, storageMode, touchChat],
   );
 
   const sendMessage = useCallback(
@@ -1036,7 +1040,7 @@ export function AgentChatSession({
       setClientError(null);
 
       if (!isSetupReady) {
-        setClientError("Finish the required Neon and Better Auth setup before chatting.");
+        setClientError("Finish setup before chatting.");
         return;
       }
 
@@ -1064,7 +1068,7 @@ export function AgentChatSession({
         const chatId = activeChatIdRef.current;
 
         if (chatId) {
-          void clearChatPendingMessageAction(chatId);
+          void clearClientChatPendingMessage(storageMode, chatId);
         }
         restoreAfterFailedSend();
         return;
@@ -1078,7 +1082,7 @@ export function AgentChatSession({
       }
 
       try {
-        const updated = await markChatPendingMessageAction({
+        const updated = await markClientChatPendingMessage(storageMode, {
           chatId,
           message,
         });
@@ -1102,7 +1106,7 @@ export function AgentChatSession({
         }
 
         stopFinalizingTurn();
-        void clearChatPendingMessageAction(chatId);
+        void clearClientChatPendingMessage(storageMode, chatId);
         restoreAfterFailedSend(error instanceof Error ? error.message : "Failed to send message.");
       }
     },
@@ -1118,6 +1122,7 @@ export function AgentChatSession({
       requestSignIn,
       setLocalPendingUserMessage,
       startFinalizingTurn,
+      storageMode,
       stopFinalizingTurn,
       onPendingUserMessageSettled,
       touchChat,
@@ -1147,7 +1152,7 @@ export function AgentChatSession({
         return;
       }
 
-      const limit = await checkSendLimitAction();
+      const limit = await checkClientSendLimit(storageMode);
 
       if (!limit.allowed) {
         setClientError(`${limit.message} Retry in ${limit.retryAfter}s.`);
@@ -1162,7 +1167,15 @@ export function AgentChatSession({
         setClientError(error instanceof Error ? error.message : "Failed to send response.");
       }
     },
-    [agent, isTurnBlocked, requestSignIn, startFinalizingTurn, stopFinalizingTurn, viewer],
+    [
+      agent,
+      isTurnBlocked,
+      requestSignIn,
+      startFinalizingTurn,
+      stopFinalizingTurn,
+      storageMode,
+      viewer,
+    ],
   );
 
   const handleSkipAuthorization = useCallback(
@@ -1201,7 +1214,7 @@ export function AgentChatSession({
       setClientError(null);
 
       try {
-        const result = await skipChatAuthorizationAction({
+        const result = await skipClientChatAuthorization(storageMode, {
           chatId,
           events,
           session: nextSession,
@@ -1258,6 +1271,7 @@ export function AgentChatSession({
       onActiveChatUpdated,
       onPendingUserMessageSettled,
       requestSignIn,
+      storageMode,
       touchChat,
       viewer,
     ],
@@ -1362,7 +1376,7 @@ export function AgentChatSession({
           resumedEventsRef.current = nextEvents;
           setResumedEvents(nextEvents);
 
-          await appendChatEventAction({
+          await appendClientChatEvent(storageMode, {
             chatId: activeChat.id,
             event: displayEvent,
             eventIndex: startIndex + nextEvents.length - 1,
@@ -1385,7 +1399,7 @@ export function AgentChatSession({
           return;
         }
 
-        await saveChatSnapshotAction({
+        await saveClientChatSnapshot(storageMode, {
           chatId: activeChat.id,
           events: allEvents,
           session: session.state,
@@ -1436,6 +1450,7 @@ export function AgentChatSession({
     onPendingUserMessageSettled,
     pendingUserMessage,
     persistSessionState,
+    storageMode,
     touchChat,
     viewer,
   ]);
@@ -2111,25 +2126,9 @@ function ComposerHint({ setupStatus }: { readonly setupStatus: SetupStatus }) {
 }
 
 function getSetupRequiredReason(setupStatus: SetupStatus) {
-  if (!setupStatus.databaseConfigured) {
-    return "Connect Neon Postgres before chatting.";
-  }
-
-  if (!setupStatus.databaseSchemaReady) {
-    return "Run database migrations before chatting.";
-  }
-
-  if (!setupStatus.authReady) {
-    return setupStatus.missing.length
-      ? `Finish auth setup. Missing: ${setupStatus.missing.join(", ")}.`
-      : "Finish auth setup before chatting.";
-  }
-
-  if (!setupStatus.rateLimitReady) {
-    return "Provision Upstash Redis before chatting.";
-  }
-
-  return "Finish setup before chatting.";
+  return setupStatus.missing.length
+    ? `Finish setup. Missing: ${setupStatus.missing.join(", ")}.`
+    : "Finish setup before chatting.";
 }
 
 function hasLatestUserMessage(

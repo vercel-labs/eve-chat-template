@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { createChatAction } from "@/app/actions/chat";
 import {
   AgentChatSession,
   ComposerFooterControls,
@@ -22,6 +21,10 @@ import {
   readPendingChatMessage,
   writePendingChatMessage,
 } from "@/lib/chat/provisional-chat";
+import {
+  createClientChat,
+  getClientChat,
+} from "@/lib/chat/persistence-client";
 import type { ActiveChat, SetupStatus } from "@/lib/chat/types";
 
 const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
@@ -102,7 +105,9 @@ export function SessionChatPage({
 
     void (async () => {
       try {
-        const created = await createChatAction({ pendingUserMessage: pendingMessage });
+        const created = await createClientChat(setupStatus.storageMode, {
+          pendingUserMessage: pendingMessage,
+        });
 
         if (currentChatIdRef.current !== chatId) {
           return;
@@ -135,6 +140,7 @@ export function SessionChatPage({
     router,
     setActiveChatId,
     setupStatus.appReady,
+    setupStatus.storageMode,
     touchChat,
     viewer,
   ]);
@@ -197,32 +203,20 @@ export function SessionChatPage({
 
     void (async () => {
       try {
-        const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
-          signal: abortController.signal,
-        });
+        const chat = await getClientChat(setupStatus.storageMode, chatId);
 
         if (cancelled) {
           return;
         }
 
-        if (!response.ok) {
-          setClientError(
-            response.status === 404
-              ? "Chat not found."
-              : "Failed to load chat history.",
-          );
+        if (!chat) {
+          setClientError("Chat not found.");
           return;
         }
 
-        const data = (await response.json()) as { readonly chat: ActiveChat | null };
-
-        if (cancelled) {
-          return;
-        }
-
-        setActiveChat(data.chat);
+        setActiveChat(chat);
         const nextPendingUserMessage = getRestorablePendingUserMessage(
-          data.chat?.pendingUserMessage ?? null,
+          chat.pendingUserMessage,
           settledPendingMessagesRef.current,
         );
 
@@ -245,7 +239,13 @@ export function SessionChatPage({
       cancelled = true;
       abortController.abort();
     };
-  }, [chatId, isProvisionalChat, setupStatus.appReady, viewer]);
+  }, [
+    chatId,
+    isProvisionalChat,
+    setupStatus.appReady,
+    setupStatus.storageMode,
+    viewer,
+  ]);
 
   useEffect(() => {
     if (!viewer) {
@@ -440,14 +440,6 @@ function getSessionComposerDisabledReason({
   readonly pendingUserMessage: string | null;
   readonly setupStatus: SetupStatus;
 }) {
-  if (!setupStatus.databaseConfigured) {
-    return "Connect Neon Postgres before chatting.";
-  }
-
-  if (!setupStatus.databaseSchemaReady) {
-    return "Run database migrations: vercel env run -e production -- pnpm db:migrate.";
-  }
-
   if (controllerStatus.disabledReason) {
     return controllerStatus.disabledReason;
   }
@@ -466,10 +458,6 @@ function getSessionComposerDisabledReason({
       : "";
 
     return `Finish auth setup before chatting.${missing}`;
-  }
-
-  if (!setupStatus.rateLimitReady) {
-    return "Provision Upstash Redis before chatting.";
   }
 
   if (controllerStatus.isDisabled) {

@@ -7,6 +7,9 @@ export type Viewer = {
   readonly name: string;
 };
 
+export type AuthMode = "local-dev" | "password" | "unconfigured" | "vercel";
+export type StorageMode = "browser" | "database";
+
 export type ChatListItem = {
   readonly id: string;
   readonly title: string;
@@ -28,10 +31,12 @@ export type ActiveChat = {
 
 export type SetupStatus = {
   readonly appReady: boolean;
+  readonly authMode: AuthMode;
   readonly authReady: boolean;
   readonly databaseConfigured: boolean;
   readonly databaseReady: boolean;
   readonly databaseSchemaReady: boolean;
   readonly missing: readonly string[];
   readonly rateLimitReady: boolean;
+  readonly storageMode: StorageMode;
 };

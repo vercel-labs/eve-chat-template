@@ -185,24 +185,12 @@ function getHomeComposerDisabledReason({
   readonly setupStatus: SetupStatus;
   readonly submitting: boolean;
 }) {
-  if (!setupStatus.databaseConfigured) {
-    return "Connect Neon Postgres before chatting.";
-  }
-
-  if (!setupStatus.databaseSchemaReady) {
-    return "Run database migrations: vercel env run -e production -- pnpm db:migrate.";
-  }
-
-  if (!setupStatus.authReady) {
+  if (!setupStatus.appReady) {
     const missing = setupStatus.missing.length
       ? ` Missing: ${setupStatus.missing.join(", ")}.`
       : "";
 
-    return `Finish auth setup before chatting.${missing}`;
-  }
-
-  if (!setupStatus.rateLimitReady) {
-    return "Provision Upstash Redis before chatting.";
+    return `Finish setup before chatting.${missing}`;
   }
 
   if (submitting) {

@@ -30,7 +30,7 @@ async function ResolvedChatBootstrap() {
   const viewer = await getServerViewer(setupStatus);
   const appReady = setupStatus.appReady;
   const initialChatsPage =
-    viewer && appReady
+    viewer && appReady && setupStatus.storageMode === "database"
       ? await listChatsPageByUser(viewer.id)
       : { items: [], nextCursor: null };
 

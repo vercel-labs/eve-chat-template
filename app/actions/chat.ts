@@ -15,6 +15,7 @@ import {
 import { assertChatMessageLength } from "@/lib/chat/limits";
 import { RateLimitError, enforceRateLimit } from "@/lib/rate-limit";
 import { getServerViewer } from "@/lib/session";
+import { getSetupStatus } from "@/lib/setup";
 
 const SEND_LIMIT = 25;
 const SEND_WINDOW_SECONDS = 60 * 60;
@@ -166,10 +167,16 @@ export async function deleteChatAction(chatId: string) {
 }
 
 async function requireViewer() {
-  const viewer = await getServerViewer();
+  const setupStatus = await getSetupStatus();
+
+  if (setupStatus.storageMode !== "database") {
+    throw new Error("Database persistence is not enabled.");
+  }
+
+  const viewer = await getServerViewer(setupStatus);
 
   if (!viewer) {
-    throw new Error("Sign in with Vercel to continue.");
+    throw new Error("Sign in to continue.");
   }
 
   return viewer;
