@@ -266,6 +266,8 @@ vercel env pull .env.local --yes
 
 For local development, the connections fall back to `slack/eve-chat-template`, `notion`, `linear`, and `sentry`, so local connectors created with the names above can work without editing files under `agent/`.
 
+The composer only shows its connections menu when at least one MCP connector environment variable is configured. A password-only starter deployment omits the menu and tells eve that no external connections are available.
+
 If a chat requires MCP authorization, use the Connect card in the chat UI. If you want to manage a connector directly, open the project integrations/settings page in Vercel and find the connector.
 
 See [Deploy Button integrations](https://vercel.com/docs/integrations/deploy-button/integrations) for how storage products are declared in the deploy URL.
