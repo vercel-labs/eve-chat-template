@@ -1097,7 +1097,10 @@ export function AgentChatSession({
       try {
         startFinalizingTurn();
         await agent.send({
-          clientContext: createConnectionClientContext(enabledConnections),
+          clientContext: createConnectionClientContext(
+            enabledConnections,
+            setupStatus.connectionsAvailable,
+          ),
           message,
         });
       } catch (error) {
@@ -1121,6 +1124,7 @@ export function AgentChatSession({
       prepareSend,
       requestSignIn,
       setLocalPendingUserMessage,
+      setupStatus.connectionsAvailable,
       startFinalizingTurn,
       storageMode,
       stopFinalizingTurn,
@@ -1950,7 +1954,14 @@ const CONNECTION_LABELS = {
   sentry: "Sentry",
 } satisfies Record<keyof EnabledConnections, string>;
 
-function createConnectionClientContext(enabledConnections: EnabledConnections) {
+function createConnectionClientContext(
+  enabledConnections: EnabledConnections,
+  connectionsAvailable: boolean,
+) {
+  if (!connectionsAvailable) {
+    return "No external connections are configured. Do not search or call connection tools.";
+  }
+
   const entries = Object.entries(CONNECTION_LABELS) as [
     keyof EnabledConnections,
     string,
@@ -2092,11 +2103,13 @@ export function ComposerFooterControls({
   return (
     <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
       <ComposerHint setupStatus={setupStatus} />
-      <IntegrationsMenu
-        enabledConnections={enabledConnections}
-        onConnectionEnabledChange={setConnectionEnabled}
-        setupStatus={setupStatus}
-      />
+      {setupStatus.connectionsAvailable ? (
+        <IntegrationsMenu
+          enabledConnections={enabledConnections}
+          onConnectionEnabledChange={setConnectionEnabled}
+          setupStatus={setupStatus}
+        />
+      ) : null}
     </div>
   );
 }
