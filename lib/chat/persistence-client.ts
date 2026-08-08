@@ -1,18 +1,19 @@
 "use client";
 
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
 import {
-  appendChatEventAction,
+  appendChatEventsAction,
   checkSendLimitAction,
   clearChatPendingMessageAction,
   createChatAction,
   deleteChatAction,
   markChatPendingMessageAction,
+  prepareChatSendAction,
   saveChatSessionStateAction,
   saveChatSnapshotAction,
 } from "@/app/actions/chat";
 import {
-  appendLocalChatEvent,
+  appendLocalChatEvents,
   clearLocalChatPendingMessage,
   createLocalChat,
   deleteLocalChat,
@@ -73,6 +74,21 @@ export async function checkClientSendLimit(
     : checkSendLimitAction(input);
 }
 
+export async function prepareClientChatSend(
+  storageMode: StorageMode,
+  input: { readonly chatId?: string; readonly message: string },
+) {
+  if (storageMode === "browser") {
+    const chat = input.chatId
+      ? markLocalChatPendingMessage(input.chatId, input.message)
+      : createLocalChat(input.message);
+
+    return { allowed: true as const, chat };
+  }
+
+  return prepareChatSendAction(input);
+}
+
 export async function markClientChatPendingMessage(
   storageMode: StorageMode,
   input: { readonly chatId: string; readonly message: string },
@@ -94,25 +110,27 @@ export async function clearClientChatPendingMessage(
   await clearChatPendingMessageAction(chatId);
 }
 
-export async function appendClientChatEvent(
+export async function appendClientChatEvents(
   storageMode: StorageMode,
   input: {
     readonly chatId: string;
-    readonly event: HandleMessageStreamEvent;
-    readonly eventIndex: number;
+    readonly events: readonly {
+      readonly event: HandleMessageStreamEvent;
+      readonly eventIndex: number;
+    }[];
   },
 ) {
   if (storageMode === "browser") {
-    appendLocalChatEvent(input);
+    appendLocalChatEvents(input.chatId, input.events);
     return;
   }
 
-  await appendChatEventAction(input);
+  await appendChatEventsAction(input);
 }
 
 export async function saveClientChatSession(
   storageMode: StorageMode,
-  input: { readonly chatId: string; readonly session: SessionState },
+  input: { readonly chatId: string; readonly session: ClientSessionState },
 ) {
   if (storageMode === "browser") {
     saveLocalChatSession(input.chatId, input.session);
@@ -127,7 +145,7 @@ export async function saveClientChatSnapshot(
   input: {
     readonly chatId: string;
     readonly events: readonly HandleMessageStreamEvent[];
-    readonly session: SessionState;
+    readonly session: ClientSessionState;
   },
 ) {
   if (storageMode === "browser") {

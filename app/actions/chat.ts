@@ -1,8 +1,8 @@
 "use server";
 
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
 import {
-  appendChatEvent,
+  appendChatEvents,
   clearChatPendingMessage,
   createChat,
   deleteChatForUser,
@@ -14,7 +14,7 @@ import {
 import { assertChatMessageLength } from "@/lib/chat/limits";
 import { RateLimitError, enforceRateLimit } from "@/lib/rate-limit";
 import { getServerViewer } from "@/lib/session";
-import { getSetupStatus } from "@/lib/setup";
+import { getInitialSetupStatus } from "@/lib/setup";
 
 const SEND_LIMIT = 25;
 const SEND_WINDOW_SECONDS = 60 * 60;
@@ -67,10 +67,47 @@ export async function checkSendLimitAction(input?: { readonly message?: string }
   }
 }
 
+export async function prepareChatSendAction(input: {
+  readonly chatId?: string;
+  readonly message: string;
+}) {
+  const viewer = await requireViewer();
+
+  try {
+    assertChatMessageLength(input.message);
+    await enforceRateLimit({
+      key: viewer.id,
+      limit: SEND_LIMIT,
+      prefix: "chat:send",
+      windowSeconds: SEND_WINDOW_SECONDS,
+    });
+  } catch (error) {
+    if (error instanceof RateLimitError) {
+      return {
+        allowed: false as const,
+        message: error.message,
+        retryAfter: error.retryAfter,
+      };
+    }
+
+    throw error;
+  }
+
+  const chat = input.chatId
+    ? await markChatPendingMessage({
+        chatId: input.chatId,
+        message: input.message,
+        userId: viewer.id,
+      })
+    : await createChat(viewer.id, { pendingUserMessage: input.message });
+
+  return { allowed: true as const, chat };
+}
+
 export async function saveChatSnapshotAction(input: {
   readonly chatId: string;
   readonly events: readonly HandleMessageStreamEvent[];
-  readonly session: SessionState;
+  readonly session: ClientSessionState;
 }) {
   const viewer = await requireViewer();
 
@@ -110,17 +147,18 @@ export async function clearChatPendingMessageAction(chatId: string) {
   return { ok: true };
 }
 
-export async function appendChatEventAction(input: {
+export async function appendChatEventsAction(input: {
   readonly chatId: string;
-  readonly event: HandleMessageStreamEvent;
-  readonly eventIndex: number;
+  readonly events: readonly {
+    readonly event: HandleMessageStreamEvent;
+    readonly eventIndex: number;
+  }[];
 }) {
   const viewer = await requireViewer();
 
-  await appendChatEvent({
+  await appendChatEvents({
     chatId: input.chatId,
-    event: input.event,
-    eventIndex: input.eventIndex,
+    events: input.events,
     userId: viewer.id,
   });
 
@@ -129,7 +167,7 @@ export async function appendChatEventAction(input: {
 
 export async function saveChatSessionStateAction(input: {
   readonly chatId: string;
-  readonly session: SessionState;
+  readonly session: ClientSessionState;
 }) {
   const viewer = await requireViewer();
 
@@ -151,7 +189,7 @@ export async function deleteChatAction(chatId: string) {
 }
 
 async function requireViewer() {
-  const setupStatus = await getSetupStatus();
+  const setupStatus = getInitialSetupStatus();
 
   if (setupStatus.storageMode !== "database") {
     throw new Error("Database persistence is not enabled.");

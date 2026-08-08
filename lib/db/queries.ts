@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, lt, or, sql } from "drizzle-orm";
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
 import { isChatTurnSettledEvent } from "@/lib/chat/events";
 import type { ActiveChat, ChatListItem, ChatListPage } from "@/lib/chat/types";
 import { createFallbackTitle, DEFAULT_CHAT_TITLE } from "@/lib/chat/title";
@@ -227,7 +227,7 @@ export async function saveChatSessionState({
   userId,
 }: {
   readonly chatId: string;
-  readonly session: SessionState;
+  readonly session: ClientSessionState;
   readonly userId: string;
 }) {
   await db
@@ -235,20 +235,35 @@ export async function saveChatSessionState({
     .set({
       eveSession: session,
     })
-    .where(and(eq(chat.id, chatId), eq(chat.userId, userId)));
+    .where(
+      and(
+        eq(chat.id, chatId),
+        eq(chat.userId, userId),
+        sql`(
+          ${chat.eveSession} is null
+          or ${chat.eveSession}->>'sessionId' <> ${session.sessionId}
+          or coalesce((${chat.eveSession}->>'streamIndex')::integer, 0) <= ${session.streamIndex}
+        )`,
+      ),
+    );
 }
 
-export async function appendChatEvent({
+export async function appendChatEvents({
   chatId,
-  event,
-  eventIndex,
+  events,
   userId,
 }: {
   readonly chatId: string;
-  readonly event: HandleMessageStreamEvent;
-  readonly eventIndex: number;
+  readonly events: readonly {
+    readonly event: HandleMessageStreamEvent;
+    readonly eventIndex: number;
+  }[];
   readonly userId: string;
 }) {
+  if (events.length === 0) {
+    return;
+  }
+
   const [ownedChat] = await db
     .select({ id: chat.id })
     .from(chat)
@@ -261,14 +276,16 @@ export async function appendChatEvent({
 
   await db
     .insert(chatEvent)
-    .values({
-      chatId,
-      event,
-      eventIndex,
-      id: randomUUID(),
-    })
+    .values(
+      events.map(({ event, eventIndex }) => ({
+        chatId,
+        event,
+        eventIndex,
+        id: randomUUID(),
+      })),
+    )
     .onConflictDoUpdate({
-      set: { event },
+      set: { event: sql`excluded.event` },
       target: [chatEvent.chatId, chatEvent.eventIndex],
     });
 }
@@ -281,7 +298,7 @@ export async function saveChatSnapshot({
 }: {
   readonly chatId: string;
   readonly events: readonly HandleMessageStreamEvent[];
-  readonly session: SessionState;
+  readonly session: ClientSessionState;
   readonly userId: string;
 }) {
   const [ownedChat] = await db

@@ -54,7 +54,7 @@ Important files:
 There are two related but separate concepts:
 
 1. A **local app chat**, represented by a browser-storage record or a row in the `chat` table.
-2. An **eve session**, represented by eve's `SessionState` and remote session
+2. An **eve session**, represented by eve's `ClientSessionState` and remote session
    stream.
 
 The app chat gives the user a stable URL such as `/chat/abc`, a sidebar title,
@@ -65,7 +65,7 @@ follow-up input.
 Production mode stores eve session state on the chat row:
 
 ```ts
-chat.eveSession: SessionState | null
+chat.eveSession: ClientSessionState | null
 ```
 
 Production mode stores eve stream events in ordered rows:
@@ -268,10 +268,13 @@ The core hook is:
 ```tsx
 const agent = useEveAgent({
   initialEvents: activeChat?.events ?? [],
-  session: persistedSessionRef.current,
+  initialSession: activeChat?.session,
   onEvent: persistStreamEvent,
   onFinish: (snapshot) => {
     void persistSnapshot(snapshot);
+  },
+  onSessionChange: (session) => {
+    void persistSessionState(session);
   },
 });
 ```
@@ -279,50 +282,26 @@ const agent = useEveAgent({
 `useEveAgent` handles reducing eve stream events into renderable chat messages.
 The template wraps it with persistence and resume logic.
 
-### Persisted Client Session
+### Built-In Client Session
 
-The browser session object is created by `createPersistedClientSession`.
-
-It exposes:
-
-- `send(input)`
-- `stream(options)`
-- `applyLocalEvents(events)`
-- `setState(nextSession)`
-- `state`
-
-When `send(input)` is called:
-
-1. It normalizes the input.
-2. It posts to `/eve/v1/session` for a new eve session, or
-   `/eve/v1/session/:sessionId` for a continuation.
-3. It reads the `x-eve-session-id` response header.
-4. It updates the local `SessionState`.
-5. It saves that session state to the chat row.
-6. It returns a browser-compatible message response whose async iterator reads
-   `/eve/v1/session/:sessionId/stream`.
+`useEveAgent` owns the browser transport and exposes `send`, `respond`,
+`session`, and reduced event/message state. `onSessionChange` saves the latest
+`ClientSessionState` as soon as eve creates or advances the session.
 
 The app never talks directly to a third-party model endpoint. It talks to eve's
 same-origin session API, which is mounted by `withEve(nextConfig)`.
 
-### Streaming
+### Streaming And Resume
 
-The stream reader is `streamSessionEvents`.
-
-It opens:
+The hook opens the same-origin eve session stream:
 
 ```txt
 GET /eve/v1/session/:sessionId/stream?startIndex=<n>
 ```
 
-Then it reads newline-delimited JSON events.
-
-For every event:
-
-1. Push it into the current stream buffer.
-2. Increment the next remote stream index.
-3. Yield it to `useEveAgent`.
-4. Stop if the event settles the turn.
+It reduces newline-delimited events into UI state and invokes the persistence
+callbacks. The template does not duplicate eve's transport, parsing, retry, or
+session-cursor implementation.
 
 A turn is considered settled when `lib/chat/events.ts` sees one of:
 
@@ -332,21 +311,8 @@ session.failed
 session.waiting
 ```
 
-The stream reader retries a few times for transient stream-open failures:
-
-- 404
-- 409
-- 425
-- 500
-- 502
-- 503
-- 504
-
-It also tolerates stream disconnects by reconnecting from the next unread stream
-index.
-
-When the async iterator exits, it calls `onFinalize(events)`, which advances the
-browser session state using the events that were actually observed.
+Refresh recovery uses `Client.sessions.attach()` at the persisted stream cursor
+and feeds the resulting events into the same snapshot persistence path.
 
 ## Sending A Message
 
@@ -357,9 +323,9 @@ The intended order is:
 1. Ignore empty input.
 2. Ignore if the session is already busy.
 3. Render an optimistic user bubble immediately when possible.
-4. Run `prepareSend(message)`.
-5. Mark the chat row with `pendingUserMessage`.
-6. Call `agent.send({ message })`.
+4. Run one client preflight that combines rate limiting, chat creation/update,
+   and the pending-message write.
+5. Call `agent.send(message)`.
 7. Let `useEveAgent`, `onEvent`, and `onFinish` handle streaming and
    persistence.
 
@@ -382,18 +348,17 @@ canonical event log.
 
 The app persists at two moments:
 
-1. As each stream event arrives
+1. In short batches while stream events arrive
 2. When the final snapshot is available
 
-### Event-By-Event Persistence
+### Batched Event Persistence
 
-`persistStreamEvent(event)` writes each event through:
+`persistStreamEvent(event)` queues events and flushes them through:
 
 ```ts
-appendChatEventAction({
+appendChatEventsAction({
   chatId,
-  event,
-  eventIndex,
+  events: [{ event, eventIndex }],
 });
 ```
 
@@ -401,8 +366,8 @@ appendChatEventAction({
 a unique index on `(chatId, eventIndex)`, and writes use conflict updates so
 retrying a write can replace the same slot.
 
-This event-by-event persistence is what makes refresh/resume possible even if
-the browser closes mid-turn.
+The queue flushes about every 500 ms. This keeps refresh/resume durability
+without paying one authentication and persistence round trip per stream event.
 
 ### Snapshot Persistence
 
@@ -411,7 +376,7 @@ When `useEveAgent` finishes a turn, it calls `onFinish(snapshot)`.
 The snapshot includes:
 
 - the full reduced event list known by eve React
-- the current eve `SessionState`
+- the current eve `ClientSessionState`
 
 The template calls `saveChatSnapshotAction({ chatId, events, session })`.
 
@@ -442,7 +407,8 @@ follow-up sends.
 
 The flow:
 
-1. Before sending to eve, the app calls `markChatPendingMessageAction`.
+1. Before sending to eve, the client preflight stores the pending message while
+   creating or updating the chat.
 2. The chat row stores:
    - `pendingUserMessage`
    - `pendingUserMessageCreatedAt`
@@ -469,20 +435,20 @@ saved eve session.
 - resume has not already started
 - `useEveAgent` is ready
 
-Then it creates a temporary persisted client session from `activeChat.session`
-and streams:
+Then it attaches the eve client to the saved session and streams from its
+cursor:
 
 ```ts
-session.stream({
-  startIndex: activeChat.events.length,
-  ignoreLeadingWaiting,
-})
+client.sessions
+  .attach(activeChat.session.sessionId, {
+    streamIndex: activeChat.session.streamIndex,
+  })
+  .stream({ startIndex: activeChat.session.streamIndex })
 ```
 
 Each resumed event is:
 
 - appended to local resume overlay state
-- written to `chat_event`
 - later included in the final snapshot
 
 When a settled event arrives, the app saves the full snapshot and clears pending

@@ -1,6 +1,6 @@
 "use client";
 
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
+import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
 import { createFallbackTitle, DEFAULT_CHAT_TITLE } from "@/lib/chat/title";
 import type { ActiveChat, ChatListItem } from "@/lib/chat/types";
 
@@ -95,7 +95,33 @@ export function appendLocalChatEvent({
   });
 }
 
-export function saveLocalChatSession(chatId: string, session: SessionState) {
+export function appendLocalChatEvents(
+  chatId: string,
+  entries: readonly {
+    readonly event: HandleMessageStreamEvent;
+    readonly eventIndex: number;
+  }[],
+) {
+  if (entries.length === 0) {
+    return;
+  }
+
+  updateChat(chatId, (chat) => {
+    const events = [...chat.events];
+
+    for (const { event, eventIndex } of entries) {
+      if (eventIndex >= events.length) {
+        events.push(event);
+      } else {
+        events[eventIndex] = event;
+      }
+    }
+
+    return { ...chat, events };
+  });
+}
+
+export function saveLocalChatSession(chatId: string, session: ClientSessionState) {
   updateChat(chatId, (chat) => ({ ...chat, session }));
 }
 
@@ -106,7 +132,7 @@ export function saveLocalChatSnapshot({
 }: {
   readonly chatId: string;
   readonly events: readonly HandleMessageStreamEvent[];
-  readonly session: SessionState;
+  readonly session: ClientSessionState;
 }) {
   updateChat(chatId, (chat) => ({
     ...chat,
