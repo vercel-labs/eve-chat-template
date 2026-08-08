@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ComposerFooterControls,
   ErrorToast,
-  type AgentChatControllerStatus,
 } from "@/app/_components/agent-chat";
 import { useChatShell } from "@/app/_components/chat-shell-context";
 import { ChatComposer } from "@/components/chat/composer";
@@ -16,13 +15,6 @@ import {
   writePendingChatMessage,
 } from "@/lib/chat/provisional-chat";
 import type { SetupStatus } from "@/lib/chat/types";
-
-const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
-  isBusy: false,
-  isCancelling: false,
-  isDisabled: false,
-  isEmpty: true,
-};
 
 export function HomeChatPage() {
   const {
@@ -163,7 +155,6 @@ export function HomeChatPage() {
               disabled={composerDisabled}
               disabledReason={composerDisabledReason}
               footerStart={<ComposerFooterControls setupStatus={setupStatus} />}
-              isBusy={IDLE_CONTROLLER_STATUS.isBusy}
               isPreparing={submitting}
               onChange={setDraft}
               onStop={() => {}}

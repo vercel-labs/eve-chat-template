@@ -656,11 +656,12 @@ The composer:
 - wraps disabled states in a tooltip
 
 For ordinary and resumed turns, the stop/send control follows the rendered eve
-event log. A `submitted` status is busy immediately; a `streaming` or resumed
-status is busy only while that log contains an open turn. Once it reaches
-`session.waiting`, the stop control is removed immediately. The send control
-remains briefly disabled while the final snapshot is saved. This keeps eve's
-durable turn boundary authoritative and prevents resume transport state from
+event log. A `submitted` status covers the short gap before the first event;
+after that, the UI remains busy exactly while the event log contains an open
+turn. Once it reaches `session.waiting`, the stop control is removed
+immediately. The send control remains briefly disabled while the final snapshot
+is saved. This keeps eve's durable turn boundary authoritative, continues to
+block a disconnected open turn, and prevents resume transport state from
 becoming a second busy-state latch.
 
 The session page keys `AgentChatSession` by both the persisted eve session

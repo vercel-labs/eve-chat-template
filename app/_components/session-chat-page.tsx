@@ -6,6 +6,7 @@ import {
   AgentChatSession,
   ComposerFooterControls,
   ErrorToast,
+  IDLE_AGENT_CHAT_CONTROLLER_STATUS,
   type AgentChatController,
   type AgentChatControllerStatus,
 } from "@/app/_components/agent-chat";
@@ -27,13 +28,6 @@ import {
 } from "@/lib/chat/persistence-client";
 import type { ActiveChat, SetupStatus } from "@/lib/chat/types";
 
-const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
-  isBusy: false,
-  isCancelling: false,
-  isDisabled: false,
-  isEmpty: true,
-};
-
 export function SessionChatPage({
   chatId,
   children,
@@ -45,7 +39,9 @@ export function SessionChatPage({
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
   const [draft, setDraft] = useState("");
   const [controllerReady, setControllerReady] = useState(false);
-  const [controllerStatus, setControllerStatus] = useState(IDLE_CONTROLLER_STATUS);
+  const [controllerStatus, setControllerStatus] = useState(
+    IDLE_AGENT_CHAT_CONTROLLER_STATUS,
+  );
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -66,7 +62,7 @@ export function SessionChatPage({
   useEffect(() => {
     controllerRef.current = null;
     setControllerReady(false);
-    setControllerStatus(IDLE_CONTROLLER_STATUS);
+    setControllerStatus(IDLE_AGENT_CHAT_CONTROLLER_STATUS);
     setActiveChat(null);
     setDraft("");
     setPendingUserMessage(null);
@@ -370,9 +366,7 @@ export function SessionChatPage({
     isLoadingChat ||
     Boolean(pendingUserMessage) ||
     controllerStatus.isDisabled;
-  const sessionInstanceKey = activeChat
-    ? `${chatId}:${activeChat.session?.sessionId ?? "new"}:${activeChat.session?.streamIndex ?? 0}:${activeChat.events.length}`
-    : `${chatId}:loading`;
+  const sessionInstanceKey = getSessionInstanceKey(chatId, activeChat);
   const composerDisabledReason = getSessionComposerDisabledReason({
     controllerStatus,
     isLoadingChat,
@@ -421,6 +415,17 @@ export function SessionChatPage({
       </div>
     </div>
   );
+}
+
+function getSessionInstanceKey(chatId: string, activeChat: ActiveChat | null) {
+  if (!activeChat) {
+    return `${chatId}:loading`;
+  }
+
+  const sessionId = activeChat.session?.sessionId ?? "new";
+  const streamIndex = activeChat.session?.streamIndex ?? 0;
+
+  return `${chatId}:${sessionId}:${streamIndex}:${activeChat.events.length}`;
 }
 
 function getRestorablePendingUserMessage(

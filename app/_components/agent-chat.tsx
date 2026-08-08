@@ -70,7 +70,7 @@ export type AgentChatControllerStatus = {
   readonly isEmpty: boolean;
 };
 
-const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
+export const IDLE_AGENT_CHAT_CONTROLLER_STATUS: AgentChatControllerStatus = {
   isBusy: false,
   isCancelling: false,
   isDisabled: false,
@@ -176,6 +176,17 @@ export function AgentChatSession({
   const storageMode = setupStatus.storageMode;
   const router = useRouter();
 
+  const clearCancellationState = useCallback(() => {
+    cancellationRequestedRef.current = false;
+    cancellationSentTurnIdRef.current = undefined;
+    setIsCancellationRequested(false);
+  }, []);
+
+  const clearTurnState = useCallback(() => {
+    currentTurnIdRef.current = undefined;
+    clearCancellationState();
+  }, [clearCancellationState]);
+
   const cancelTurn = useCallback((turnId: string) => {
     const sessionId = currentSessionRef.current?.sessionId;
 
@@ -189,14 +200,12 @@ export function AgentChatSession({
       .attach(sessionId)
       .cancel({ turnId })
       .catch((error: unknown) => {
-        cancellationRequestedRef.current = false;
-        cancellationSentTurnIdRef.current = undefined;
-        setIsCancellationRequested(false);
+        clearCancellationState();
         setClientError(
           error instanceof Error ? error.message : "Failed to stop the response.",
         );
       });
-  }, []);
+  }, [clearCancellationState]);
 
   const requestCancellation = useCallback(() => {
     if (cancellationRequestedRef.current) {
@@ -217,10 +226,6 @@ export function AgentChatSession({
   }, []);
 
   const stopFinalizingTurn = useCallback(() => {
-    setIsFinalizingTurn(false);
-  }, []);
-
-  const finishFinalizingTurn = useCallback(() => {
     setIsFinalizingTurn(false);
   }, []);
 
@@ -293,18 +298,15 @@ export function AgentChatSession({
         });
         onPendingUserMessageSettled?.();
         failedSendRecoveryRef.current = null;
-        cancellationRequestedRef.current = false;
-        cancellationSentTurnIdRef.current = undefined;
-        currentTurnIdRef.current = undefined;
-        setIsCancellationRequested(false);
+        clearTurnState();
       } catch (error) {
         setClientError(error instanceof Error ? error.message : "Failed to save chat.");
       } finally {
-        finishFinalizingTurn();
+        stopFinalizingTurn();
       }
     },
     [
-      finishFinalizingTurn,
+      clearTurnState,
       onActiveChatUpdated,
       onPendingUserMessageSettled,
       stopFinalizingTurn,
@@ -345,10 +347,7 @@ export function AgentChatSession({
       } else if (event.type === "message.received") {
         failedSendRecoveryRef.current = null;
       } else if (isChatTurnSettledEvent(event)) {
-        currentTurnIdRef.current = undefined;
-        cancellationRequestedRef.current = false;
-        cancellationSentTurnIdRef.current = undefined;
-        setIsCancellationRequested(false);
+        clearTurnState();
       }
       const chatId = activeChatIdRef.current;
 
@@ -371,7 +370,7 @@ export function AgentChatSession({
         }, STREAM_EVENT_BATCH_DELAY_MS);
       }
     },
-    [cancelTurn, flushEventBatch, viewer],
+    [cancelTurn, clearTurnState, flushEventBatch, viewer],
   );
 
   const persistSessionState = useCallback(
@@ -448,10 +447,9 @@ export function AgentChatSession({
     [displayEvents],
   );
   const isBusy =
-    (isResuming && hasOpenDisplayTurn) ||
     hasUnconfirmedLocalPendingUserMessage ||
     agent.status === "submitted" ||
-    (agent.status === "streaming" && hasOpenDisplayTurn);
+    hasOpenDisplayTurn;
   const isTurnBlocked = isBusy || isFinalizingTurn;
   const pendingMessage = pendingUserMessage
     ? createPendingUserMessage(displayChatId, pendingUserMessage)
@@ -488,17 +486,14 @@ export function AgentChatSession({
     resumeStartedRef.current = false;
     resumedEventsRef.current = [];
     currentSessionRef.current = undefined;
-    currentTurnIdRef.current = undefined;
-    cancellationRequestedRef.current = false;
-    cancellationSentTurnIdRef.current = undefined;
-    setIsCancellationRequested(false);
+    clearTurnState();
     failedSendRecoveryRef.current = null;
     setResumedEvents([]);
     stopFinalizingTurn();
     clearLocalPendingUserMessage();
     setIsResuming(false);
     setClientError(null);
-  }, [agent, clearLocalPendingUserMessage, stopFinalizingTurn]);
+  }, [agent, clearLocalPendingUserMessage, clearTurnState, stopFinalizingTurn]);
 
   const prepareSend = useCallback(
     async (firstMessage: string) => {
@@ -582,10 +577,7 @@ export function AgentChatSession({
       showLocalPendingMessage();
       onPendingUserMessageSettled?.(message);
       turnTimingRef.current = { startedAt: performance.now() };
-      cancellationRequestedRef.current = false;
-      cancellationSentTurnIdRef.current = undefined;
-      currentTurnIdRef.current = undefined;
-      setIsCancellationRequested(false);
+      clearTurnState();
       failedSendRecoveryRef.current = restoreAfterFailedSend;
 
       try {
@@ -642,6 +634,7 @@ export function AgentChatSession({
     [
       agent,
       clearLocalPendingUserMessage,
+      clearTurnState,
       isSetupReady,
       isTurnBlocked,
       prepareSend,
@@ -811,10 +804,7 @@ export function AgentChatSession({
               cancelTurn(event.data.turnId);
             }
           } else if (isChatTurnSettledEvent(event)) {
-            currentTurnIdRef.current = undefined;
-            cancellationRequestedRef.current = false;
-            cancellationSentTurnIdRef.current = undefined;
-            setIsCancellationRequested(false);
+            clearTurnState();
             setIsResuming(false);
             startFinalizingTurn();
           }
@@ -861,10 +851,7 @@ export function AgentChatSession({
         });
 
         onPendingUserMessageSettled?.();
-        currentTurnIdRef.current = undefined;
-        cancellationRequestedRef.current = false;
-        cancellationSentTurnIdRef.current = undefined;
-        setIsCancellationRequested(false);
+        clearTurnState();
         completed = true;
       } catch (error) {
         if (!cancelled && !isAbortError(error)) {
@@ -873,6 +860,7 @@ export function AgentChatSession({
       } finally {
         if (!cancelled) {
           setIsResuming(false);
+          stopFinalizingTurn();
         }
       }
     })();
@@ -890,10 +878,12 @@ export function AgentChatSession({
     activeChat?.session,
     agent.status,
     cancelTurn,
+    clearTurnState,
     onActiveChatUpdated,
     onPendingUserMessageSettled,
     pendingUserMessage,
     startFinalizingTurn,
+    stopFinalizingTurn,
     storageMode,
     touchChat,
     viewer,
@@ -965,7 +955,7 @@ export function AgentChatSession({
 
   useEffect(() => {
     return () => {
-      onControllerChange(null, IDLE_CONTROLLER_STATUS);
+      onControllerChange(null, IDLE_AGENT_CHAT_CONTROLLER_STATUS);
     };
   }, [onControllerChange]);
 
