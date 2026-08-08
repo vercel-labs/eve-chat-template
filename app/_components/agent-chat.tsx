@@ -439,14 +439,17 @@ export function AgentChatSession({
     : agent.data;
   const displayMessages = displayData.messages;
   const displayChatId = chatId ?? activeChatId ?? "new";
-  const hasLocalPendingUserMessage = Boolean(localPendingUserMessage);
+  const hasUnconfirmedLocalPendingUserMessage = Boolean(
+    localPendingUserMessage &&
+      !hasLatestUserMessage(displayMessages, localPendingUserMessage),
+  );
   const hasOpenAgentTurn = useMemo(
     () => Boolean(getOpenChatTurnId(agent.events)),
     [agent.events],
   );
   const isBusy =
     isResuming ||
-    hasLocalPendingUserMessage ||
+    hasUnconfirmedLocalPendingUserMessage ||
     agent.status === "submitted" ||
     (agent.status === "streaming" && hasOpenAgentTurn);
   const isTurnBlocked = isBusy || isFinalizingTurn;

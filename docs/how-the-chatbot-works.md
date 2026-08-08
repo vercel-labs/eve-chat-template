@@ -664,6 +664,12 @@ store publishing its following `ready` snapshot. Persisted events are still
 used only to decide whether an interrupted session needs to resume, so database
 snapshot finalization cannot become a second busy-state latch.
 
+The app-level optimistic pending message covers only the preflight gap before
+eve confirms the input. Once the matching `message.received` user message is in
+the rendered event projection, that optimistic flag no longer contributes to
+busy state even if its cleanup effect has not run yet. This prevents a stale
+optimistic value from leaving the stop button visible after a completed turn.
+
 Root and session pages render the same composer component, but they place it
 differently:
 
