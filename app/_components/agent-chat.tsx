@@ -443,15 +443,15 @@ export function AgentChatSession({
     localPendingUserMessage &&
       !hasLatestUserMessage(displayMessages, localPendingUserMessage),
   );
-  const hasOpenAgentTurn = useMemo(
-    () => Boolean(getOpenChatTurnId(agent.events)),
-    [agent.events],
+  const hasOpenDisplayTurn = useMemo(
+    () => Boolean(getOpenChatTurnId(displayEvents)),
+    [displayEvents],
   );
   const isBusy =
-    isResuming ||
+    (isResuming && hasOpenDisplayTurn) ||
     hasUnconfirmedLocalPendingUserMessage ||
     agent.status === "submitted" ||
-    (agent.status === "streaming" && hasOpenAgentTurn);
+    (agent.status === "streaming" && hasOpenDisplayTurn);
   const isTurnBlocked = isBusy || isFinalizingTurn;
   const pendingMessage = pendingUserMessage
     ? createPendingUserMessage(displayChatId, pendingUserMessage)
@@ -815,6 +815,8 @@ export function AgentChatSession({
             cancellationRequestedRef.current = false;
             cancellationSentTurnIdRef.current = undefined;
             setIsCancellationRequested(false);
+            setIsResuming(false);
+            startFinalizingTurn();
           }
 
           const nextEvents = appendUniqueStreamEvent(resumedEventsRef.current, event);
@@ -891,6 +893,7 @@ export function AgentChatSession({
     onActiveChatUpdated,
     onPendingUserMessageSettled,
     pendingUserMessage,
+    startFinalizingTurn,
     storageMode,
     touchChat,
     viewer,

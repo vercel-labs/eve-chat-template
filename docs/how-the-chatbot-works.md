@@ -655,14 +655,20 @@ The composer:
 - shows a spinner when the root page is creating a chat
 - wraps disabled states in a tooltip
 
-For ordinary turns, the stop/send control follows `useEveAgent.status` while an
-actual turn is open. A `submitted` status is busy immediately; a `streaming`
-status is busy only until the agent's in-memory event log reaches
-`session.waiting`. This keeps eve's durable turn boundary authoritative while
-also covering the transient render between receiving that boundary and the
-store publishing its following `ready` snapshot. Persisted events are still
-used only to decide whether an interrupted session needs to resume, so database
-snapshot finalization cannot become a second busy-state latch.
+For ordinary and resumed turns, the stop/send control follows the rendered eve
+event log. A `submitted` status is busy immediately; a `streaming` or resumed
+status is busy only while that log contains an open turn. Once it reaches
+`session.waiting`, the stop control is removed immediately. The send control
+remains briefly disabled while the final snapshot is saved. This keeps eve's
+durable turn boundary authoritative and prevents resume transport state from
+becoming a second busy-state latch.
+
+The session page keys `AgentChatSession` by the persisted eve session cursor.
+After a completed or cancelled resumed stream is saved, the hook remounts with
+the advanced `initialSession` and event prefix before another send is enabled.
+This matters because `useEveAgent` reads those initial values when its store is
+created; reusing the pre-resume store can otherwise render an optimistic next
+message without starting its turn.
 
 The app-level optimistic pending message covers only the preflight gap before
 eve confirms the input. Once the matching `message.received` user message is in
