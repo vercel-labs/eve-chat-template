@@ -663,12 +663,13 @@ remains briefly disabled while the final snapshot is saved. This keeps eve's
 durable turn boundary authoritative and prevents resume transport state from
 becoming a second busy-state latch.
 
-The session page keys `AgentChatSession` by the persisted eve session cursor.
-After a completed or cancelled resumed stream is saved, the hook remounts with
-the advanced `initialSession` and event prefix before another send is enabled.
-This matters because `useEveAgent` reads those initial values when its store is
-created; reusing the pre-resume store can otherwise render an optimistic next
-message without starting its turn.
+The session page keys `AgentChatSession` by both the persisted eve session
+cursor and event-prefix length. After a completed or cancelled resumed stream
+is saved, the hook remounts with the final `initialSession` and event prefix
+before another send is enabled. Both values matter because the session cursor
+can be persisted before the final event snapshot, and `useEveAgent` reads its
+initial values when its store is created. Reusing the pre-resume store can
+otherwise render an optimistic next message without starting its turn.
 
 The app-level optimistic pending message covers only the preflight gap before
 eve confirms the input. Once the matching `message.received` user message is in

@@ -371,7 +371,7 @@ export function SessionChatPage({
     Boolean(pendingUserMessage) ||
     controllerStatus.isDisabled;
   const sessionInstanceKey = activeChat
-    ? `${chatId}:${activeChat.session?.sessionId ?? "new"}:${activeChat.session?.streamIndex ?? 0}`
+    ? `${chatId}:${activeChat.session?.sessionId ?? "new"}:${activeChat.session?.streamIndex ?? 0}:${activeChat.events.length}`
     : `${chatId}:loading`;
   const composerDisabledReason = getSessionComposerDisabledReason({
     controllerStatus,
