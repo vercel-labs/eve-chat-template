@@ -1,29 +1,36 @@
 "use client";
 
-import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
+import type {
+  EveAuthorizationPart,
+  EveDynamicToolPart,
+  EveMessage,
+  EveMessagePart,
+} from "eve/react";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
   CheckIcon,
+  ExternalLinkIcon,
+  FileIcon,
+  ImageIcon,
+  KeyRoundIcon,
   Loader2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const STREAM_TEXT_TICK_MS = 60;
-const STREAM_TEXT_CACHE_LIMIT = 40;
-const streamingTextCache = new Map<string, string>();
-
 export type AgentInputResponse = {
   readonly optionId?: string;
   readonly requestId: string;
   readonly text?: string;
 };
+
+type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
 export function AgentMessage({
   canRespond,
@@ -62,7 +69,6 @@ export function AgentMessage({
           canRespond={canRespond}
           isUser={isUser}
           lastTextIndex={lastTextIndex}
-          messageId={message.id}
           onInputResponses={onInputResponses}
           parts={message.parts}
           showCaret={isStreaming && message.role === "assistant"}
@@ -76,7 +82,6 @@ function AgentMessageParts({
   canRespond,
   isUser,
   lastTextIndex,
-  messageId,
   onInputResponses,
   parts,
   showCaret,
@@ -84,7 +89,6 @@ function AgentMessageParts({
   readonly canRespond: boolean;
   readonly isUser: boolean;
   readonly lastTextIndex: number;
-  readonly messageId: string;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly parts: readonly EveMessagePart[];
   readonly showCaret: boolean;
@@ -128,7 +132,6 @@ function AgentMessageParts({
         onInputResponses={onInputResponses}
         part={part}
         showCaret={showCaret && index === lastTextIndex}
-        streamKey={`${messageId}:${key}`}
       />,
     );
   });
@@ -144,14 +147,12 @@ function AgentMessagePart({
   onInputResponses,
   part,
   showCaret,
-  streamKey,
 }: {
   readonly canRespond: boolean;
   readonly isUser: boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
-  readonly streamKey: string;
 }) {
   switch (part.type) {
     case "step-start":
@@ -160,10 +161,14 @@ function AgentMessagePart({
       return isUser ? (
         <UserTextPart text={part.text} />
       ) : (
-        <AssistantTextPart showCaret={showCaret} streamKey={streamKey} text={part.text} />
+        <AssistantTextPart showCaret={showCaret} text={part.text} />
       );
     case "reasoning":
       return <ReasoningPart isStreaming={part.state === "streaming"} text={part.text} />;
+    case "file":
+      return <AttachmentPart part={part} />;
+    case "authorization":
+      return <AuthorizationPrompt part={part} />;
     case "dynamic-tool":
       return null;
   }
@@ -175,153 +180,119 @@ function UserTextPart({ text }: { readonly text: string }) {
 
 function AssistantTextPart({
   showCaret,
-  streamKey,
   text,
 }: {
   readonly showCaret: boolean;
-  readonly streamKey: string;
   readonly text: string;
 }) {
-  const smoothedText = useStreamingText(text, showCaret, streamKey);
-  const isRevealActive = smoothedText.length > 0 && (showCaret || smoothedText !== text);
-  const showVisibleCaret = showCaret && smoothedText.length > 0;
-
   return (
-    <Markdown
-      animated={isRevealActive ? { duration: 0, stagger: 0 } : undefined}
-      caret={showVisibleCaret ? "block" : undefined}
-      isAnimating={isRevealActive}
-    >
-      {smoothedText}
+    <Markdown caret={showCaret ? "block" : undefined} isAnimating={showCaret}>
+      {text}
     </Markdown>
   );
 }
 
-function useStreamingText(text: string, isStreaming: boolean, streamKey: string) {
-  const [visibleText, setVisibleText] = useState(() =>
-    getInitialStreamingText(text, isStreaming, streamKey),
+function AttachmentPart({ part }: { readonly part: EveFilePart }) {
+  const label = part.filename ?? "Attachment";
+  const detail = [part.mediaType, formatBytes(part.size)].filter(Boolean).join(" · ");
+  const isImage = part.mediaType.startsWith("image/") && part.url !== undefined;
+  const Icon = isImage ? ImageIcon : FileIcon;
+  const content = (
+    <span className="mx-3 flex max-w-sm items-center gap-3 rounded-md border border-border bg-background/60 p-2 text-sm">
+      {isImage ? (
+        // The URL is projected by eve only when the browser can resolve it.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img alt={label} className="size-12 shrink-0 rounded-sm object-cover" src={part.url} />
+      ) : (
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground">
+          <Icon className="size-4" />
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{label}</span>
+        {detail ? <span className="block truncate text-muted-foreground">{detail}</span> : null}
+      </span>
+      {part.url ? <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" /> : null}
+    </span>
   );
-  const visibleTextRef = useRef(visibleText);
 
-  useEffect(() => {
-    visibleTextRef.current = visibleText;
-  }, [visibleText]);
-
-  useEffect(() => {
-    const current = visibleTextRef.current;
-
-    if (!isStreaming && (current === text || !text.startsWith(current))) {
-      if (current !== text) {
-        visibleTextRef.current = text;
-        rememberStreamingText(streamKey, text);
-        setVisibleText(text);
-      }
-
-      return;
-    }
-
-    const catchUp = !isStreaming;
-    let interval: number | undefined;
-
-    const advance = () => {
-      const next = nextStreamingText(visibleTextRef.current, text, catchUp);
-
-      if (next !== visibleTextRef.current) {
-        visibleTextRef.current = next;
-        rememberStreamingText(streamKey, next);
-        setVisibleText(next);
-      }
-
-      if (catchUp && next === text && interval !== undefined) {
-        window.clearInterval(interval);
-        interval = undefined;
-      }
-    };
-
-    advance();
-
-    if (catchUp && visibleTextRef.current === text) {
-      return;
-    }
-
-    interval = window.setInterval(advance, STREAM_TEXT_TICK_MS);
-
-    return () => {
-      if (interval !== undefined) {
-        window.clearInterval(interval);
-      }
-    };
-  }, [isStreaming, streamKey, text]);
-
-  useEffect(() => {
-    if (!isStreaming && visibleText === text) {
-      streamingTextCache.delete(streamKey);
-    }
-  }, [isStreaming, streamKey, text, visibleText]);
-
-  return visibleText;
+  return part.url ? (
+    <a href={part.url} rel="noreferrer" target="_blank">
+      {content}
+    </a>
+  ) : (
+    content
+  );
 }
 
-function getInitialStreamingText(text: string, isStreaming: boolean, streamKey: string) {
-  const cachedText = streamingTextCache.get(streamKey);
+function AuthorizationPrompt({ part }: { readonly part: EveAuthorizationPart }) {
+  const isComplete = part.state === "completed";
+  const isAuthorized = isComplete && part.outcome === "authorized";
+  const title = isComplete
+    ? isAuthorized
+      ? `${part.displayName} connected`
+      : `${part.displayName} authorization ${part.outcome}`
+    : `Connect ${part.displayName}`;
 
-  if (cachedText && text.startsWith(cachedText)) {
-    return cachedText;
-  }
-
-  return isStreaming ? "" : text;
+  return (
+    <section
+      className={cn(
+        "mx-3 space-y-3 rounded-md border p-3 text-sm",
+        isAuthorized
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : isComplete
+            ? "border-destructive/30 bg-destructive/5"
+            : "border-blue-500/30 bg-blue-500/5",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-background">
+          {isComplete ? (
+            isAuthorized ? (
+              <CheckIcon className="size-4 text-emerald-500" />
+            ) : (
+              <XIcon className="size-4 text-destructive" />
+            )
+          ) : (
+            <KeyRoundIcon className="size-4 text-blue-500" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="font-medium">{title}</p>
+          <p className="text-muted-foreground">{part.description}</p>
+          {part.state === "required" && part.authorization?.userCode ? (
+            <code className="inline-block rounded-md bg-background px-2 py-1 font-mono">
+              {part.authorization.userCode}
+            </code>
+          ) : null}
+          {part.state === "required" && part.authorization?.url ? (
+            <Button asChild size="sm">
+              <a href={part.authorization.url} rel="noreferrer" target="_blank">
+                <ExternalLinkIcon className="size-4" />
+                Sign in with {part.displayName}
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
 }
 
-function rememberStreamingText(streamKey: string, text: string) {
-  if (!text) {
-    return;
+function formatBytes(size: number | undefined) {
+  if (size === undefined) {
+    return undefined;
   }
 
-  streamingTextCache.delete(streamKey);
-  streamingTextCache.set(streamKey, text);
-
-  if (streamingTextCache.size <= STREAM_TEXT_CACHE_LIMIT) {
-    return;
+  if (size < 1024) {
+    return `${size} B`;
   }
 
-  const oldestKey = streamingTextCache.keys().next().value;
-
-  if (oldestKey) {
-    streamingTextCache.delete(oldestKey);
-  }
-}
-
-function nextStreamingText(current: string, target: string, catchUp = false) {
-  if (current === target) {
-    return current;
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
   }
 
-  if (!target.startsWith(current)) {
-    return target;
-  }
-
-  const remaining = target.length - current.length;
-  const step = catchUp
-    ? remaining > 160
-      ? 18
-      : remaining > 80
-        ? 12
-        : remaining > 32
-          ? 7
-          : remaining > 12
-            ? 4
-            : 2
-    : remaining > 160
-      ? 6
-      : remaining > 80
-        ? 5
-        : remaining > 32
-          ? 3
-          : remaining > 12
-            ? 2
-            : 1;
-
-  return target.slice(0, current.length + Math.min(remaining, step));
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function ReasoningPart({

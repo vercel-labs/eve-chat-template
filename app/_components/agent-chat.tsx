@@ -105,42 +105,6 @@ function hasOpenChatTurn(events: readonly MessageStreamEvent[]) {
   return open;
 }
 
-function namespaceStreamEvent(
-  event: MessageStreamEvent,
-  namespace: string | undefined,
-): MessageStreamEvent {
-  if (!namespace) {
-    return event;
-  }
-
-  if (!("data" in event) || typeof event.data !== "object" || !event.data) {
-    return event;
-  }
-
-  const turnId =
-    "turnId" in event.data && typeof event.data.turnId === "string"
-      ? event.data.turnId
-      : undefined;
-
-  if (!turnId) {
-    return event;
-  }
-
-  const prefix = `${namespace}:`;
-
-  if (turnId.startsWith(prefix)) {
-    return event;
-  }
-
-  return {
-    ...event,
-    data: {
-      ...event.data,
-      turnId: `${prefix}${turnId}`,
-    },
-  } as MessageStreamEvent;
-}
-
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -180,7 +144,6 @@ export function AgentChatSession({
   const [resumedEvents, setResumedEvents] = useState<MessageStreamEvent[]>([]);
   const [isResuming, setIsResuming] = useState(false);
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
-  const [streamEvents, setStreamEvents] = useState<MessageStreamEvent[]>([]);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
@@ -196,7 +159,6 @@ export function AgentChatSession({
   const currentTitleRef = useRef(activeChat?.title ?? "New chat");
   const resumeStartedRef = useRef(false);
   const resumedEventsRef = useRef<MessageStreamEvent[]>([]);
-  const streamEventsRef = useRef<MessageStreamEvent[]>([]);
   const currentSessionRef = useRef<ClientSessionState | undefined>(activeChat?.session);
   const pendingEventBatchRef = useRef<PendingPersistedEvent[]>([]);
   const persistEventTimerRef = useRef<number | null>(null);
@@ -295,17 +257,10 @@ export function AgentChatSession({
         }
         pendingEventBatchRef.current = [];
 
-        const snapshotEvents =
-          streamEventsRef.current.length > 0
-            ? mergeStreamEventLogs(
-                knownInitialEventsRef.current,
-                streamEventsRef.current,
-              )
-            : preserveKnownInitialEvents(
-                snapshot.events,
-                knownInitialEventsRef.current,
-              );
-        const events = snapshotEvents;
+        const events = mergeStreamEventLogs(
+          knownInitialEventsRef.current,
+          snapshot.events,
+        );
         const session = snapshot.session;
 
         await saveClientChatSnapshot(storageMode, {
@@ -315,8 +270,6 @@ export function AgentChatSession({
         });
         eventIndexRef.current = events.length;
         knownInitialEventsRef.current = events;
-        streamEventsRef.current = [];
-        setStreamEvents([]);
         touchChat({
           id: chatId,
           title: currentTitleRef.current,
@@ -373,11 +326,6 @@ export function AgentChatSession({
 
   const persistStreamEvent = useCallback(
     (event: MessageStreamEvent) => {
-      const displayEvent = namespaceStreamEvent(
-        event,
-        currentSessionRef.current?.sessionId,
-      );
-
       if (event.type === "turn.started") {
         currentTurnIdRef.current = event.data.turnId;
 
@@ -391,16 +339,6 @@ export function AgentChatSession({
         cancellationRequestedRef.current = false;
         cancellationSentTurnIdRef.current = undefined;
       }
-      const nextStreamEvents = appendUniqueStreamEvent(
-        streamEventsRef.current,
-        displayEvent,
-      );
-
-      if (nextStreamEvents !== streamEventsRef.current) {
-        streamEventsRef.current = nextStreamEvents;
-        setStreamEvents(nextStreamEvents);
-      }
-
       const chatId = activeChatIdRef.current;
 
       if (!viewer || !chatId) {
@@ -413,7 +351,7 @@ export function AgentChatSession({
 
       const eventIndex = eventIndexRef.current;
       eventIndexRef.current += 1;
-      pendingEventBatchRef.current.push({ event: displayEvent, eventIndex });
+      pendingEventBatchRef.current.push({ event, eventIndex });
 
       if (persistEventTimerRef.current === null) {
         persistEventTimerRef.current = window.setTimeout(() => {
@@ -464,17 +402,30 @@ export function AgentChatSession({
     },
   });
 
-  const hasResumeOverlay = isResuming || (resumedEvents.length > 0 && streamEvents.length === 0);
+  const hasResumeOverlay = isResuming || resumedEvents.length > 0;
   const resumedEventLog = useMemo(
-    () => [...(activeChat?.events ?? []), ...resumedEvents],
+    () => mergeStreamEventLogs(activeChat?.events ?? [], resumedEvents),
     [activeChat?.events, resumedEvents],
   );
   const agentEventLog = useMemo(
-    () => mergeStreamEventLogs(activeChat?.events ?? [], streamEvents),
-    [activeChat?.events, streamEvents],
+    () => mergeStreamEventLogs(activeChat?.events ?? [], agent.events),
+    [activeChat?.events, agent.events],
   );
   const displayEvents = hasResumeOverlay ? resumedEventLog : agentEventLog;
-  const displayData = useMemo(() => reduceEventsToMessageData(displayEvents), [displayEvents]);
+  const hasEventsOutsideAgent = useMemo(
+    () =>
+      (activeChat?.events ?? []).some(
+        (event) => !agent.events.some((agentEvent) => areSameStreamEvent(agentEvent, event)),
+      ),
+    [activeChat?.events, agent.events],
+  );
+  const projectedDisplayData = useMemo(
+    () => reduceEventsToMessageData(displayEvents),
+    [displayEvents],
+  );
+  const displayData = hasResumeOverlay || hasEventsOutsideAgent
+    ? projectedDisplayData
+    : agent.data;
   const displayMessages = displayData.messages;
   const displayChatId = chatId ?? activeChatId ?? "new";
   const hasLocalPendingUserMessage = Boolean(localPendingUserMessage);
@@ -504,7 +455,7 @@ export function AgentChatSession({
   const isEmpty = visibleMessages.length === 0 && !isTurnBlocked;
   const isChatRoute = Boolean(shellActiveChatId || chatId);
   const showThinking =
-    Boolean(pendingMessage || localPendingMessage) || hasOpenTurn || isTurnBlocked;
+    isBusy && !hasRenderableAssistantProgress(visibleMessages.at(-1));
   const thinkingPresence = useThinkingPresence(showThinking);
   const displayError = clientError ?? agent.error?.message ?? null;
   const toastError = displayError && dismissedError !== displayError ? displayError : null;
@@ -520,14 +471,12 @@ export function AgentChatSession({
     currentTitleRef.current = "New chat";
     resumeStartedRef.current = false;
     resumedEventsRef.current = [];
-    streamEventsRef.current = [];
     currentSessionRef.current = undefined;
     currentTurnIdRef.current = undefined;
     cancellationRequestedRef.current = false;
     cancellationSentTurnIdRef.current = undefined;
     failedSendRecoveryRef.current = null;
     setResumedEvents([]);
-    setStreamEvents([]);
     stopFinalizingTurn();
     clearLocalPendingUserMessage();
     setIsResuming(false);
@@ -749,8 +698,6 @@ export function AgentChatSession({
       eventIndexChatIdRef.current = nextChatId;
       eventIndexRef.current = nextEventIndex;
       knownInitialEventsRef.current = activeChat?.events ?? [];
-      streamEventsRef.current = [];
-      setStreamEvents([]);
       stopFinalizingTurn();
       clearLocalPendingUserMessage();
     } else if (!isTurnBlocked) {
@@ -838,11 +785,7 @@ export function AgentChatSession({
           }
           isFirstEvent = false;
 
-          const displayEvent = namespaceStreamEvent(
-            event,
-            activeChat.session?.sessionId,
-          );
-          const nextEvents = [...resumedEventsRef.current, displayEvent];
+          const nextEvents = appendUniqueStreamEvent(resumedEventsRef.current, event);
           resumedEventsRef.current = nextEvents;
           setResumedEvents(nextEvents);
 
@@ -856,7 +799,7 @@ export function AgentChatSession({
         }
 
         const newEvents = resumedEventsRef.current;
-        const allEvents = [...existingEvents, ...newEvents];
+        const allEvents = mergeStreamEventLogs(existingEvents, newEvents);
 
         if (!newEvents.some(isChatTurnSettledEvent)) {
           setClientError("Stream disconnected before the response completed.");
@@ -870,8 +813,6 @@ export function AgentChatSession({
         });
         eventIndexRef.current = allEvents.length;
         knownInitialEventsRef.current = allEvents;
-        resumedEventsRef.current = [];
-        setResumedEvents([]);
         touchChat({
           id: activeChat.id,
           title: currentTitleRef.current,
@@ -921,6 +862,25 @@ export function AgentChatSession({
   useEffect(() => {
     currentTitleRef.current = currentTitle;
   }, [currentTitle]);
+
+  useEffect(() => {
+    const resumed = resumedEventsRef.current;
+
+    if (
+      resumed.length === 0 ||
+      !activeChat ||
+      !resumed.every((event) =>
+        activeChat.events.some((persistedEvent) =>
+          areSameStreamEvent(persistedEvent, event),
+        ),
+      )
+    ) {
+      return;
+    }
+
+    resumedEventsRef.current = [];
+    setResumedEvents([]);
+  }, [activeChat]);
 
   useEffect(() => {
     setDismissedError(null);
@@ -1046,55 +1006,22 @@ function appendUniqueStreamEvent(
   return [...events, event];
 }
 
-function preserveKnownInitialEvents(
-  snapshotEvents: readonly MessageStreamEvent[],
-  knownEvents: readonly MessageStreamEvent[],
-) {
-  if (knownEvents.length === 0) {
-    return snapshotEvents;
-  }
-
-  if (snapshotEvents.length === 0) {
-    return knownEvents;
-  }
-
-  const sharedPrefixLength = countSharedEventPrefix(snapshotEvents, knownEvents);
-
-  if (sharedPrefixLength === knownEvents.length) {
-    return snapshotEvents;
-  }
-
-  if (sharedPrefixLength === snapshotEvents.length) {
-    return knownEvents;
-  }
-
-  if (sharedPrefixLength > 0) {
-    return [...knownEvents, ...snapshotEvents.slice(sharedPrefixLength)];
-  }
-
-  return [...knownEvents, ...snapshotEvents];
-}
-
-function countSharedEventPrefix(
-  events: readonly MessageStreamEvent[],
-  knownEvents: readonly MessageStreamEvent[],
-) {
-  const count = Math.min(events.length, knownEvents.length);
-
-  for (let index = 0; index < count; index += 1) {
-    if (!areSameStreamEvent(knownEvents[index]!, events[index])) {
-      return index;
-    }
-  }
-
-  return count;
-}
-
 function areSameStreamEvent(
   left: MessageStreamEvent,
   right: MessageStreamEvent | undefined,
 ) {
-  return right !== undefined && areEqualJsonValues(left, right);
+  if (right === undefined) {
+    return false;
+  }
+
+  const leftId = left.meta?.id;
+  const rightId = right.meta?.id;
+
+  if (leftId && rightId) {
+    return leftId === rightId;
+  }
+
+  return areEqualJsonValues(left, right);
 }
 
 function areEqualJsonValues(left: unknown, right: unknown): boolean {
@@ -1151,6 +1078,24 @@ function appendPendingUserMessages(
   }
 
   return nextMessages;
+}
+
+function hasRenderableAssistantProgress(message: EveMessage | undefined) {
+  if (message?.role !== "assistant") {
+    return false;
+  }
+
+  return message.parts.some((part) => {
+    if (part.type === "step-start") {
+      return false;
+    }
+
+    if (part.type === "text" || part.type === "reasoning") {
+      return part.text.length > 0;
+    }
+
+    return true;
+  });
 }
 
 function createPendingUserMessage(

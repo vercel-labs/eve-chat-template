@@ -301,7 +301,9 @@ GET /eve/v1/session/:sessionId/stream?startIndex=<n>
 
 It reduces newline-delimited events into UI state and invokes the persistence
 callbacks. The template does not duplicate eve's transport, parsing, retry, or
-session-cursor implementation.
+session-cursor implementation. During an ordinary turn, the UI renders
+`agent.data.messages` directly; it does not maintain a second live event
+projection or replay eve's cumulative text through another timer.
 
 A turn is considered settled when `lib/chat/events.ts` sees one of:
 
@@ -326,7 +328,7 @@ The intended order is:
 4. Run one client preflight that combines rate limiting, chat creation/update,
    and the pending-message write.
 5. Call `agent.send(message)`.
-7. Let `useEveAgent`, `onEvent`, and `onFinish` handle streaming and
+6. Let `useEveAgent`, `onEvent`, and `onFinish` handle streaming and
    persistence.
 
 `prepareSend` does the things that must happen before talking to eve:
@@ -389,16 +391,14 @@ updates the chat timestamp.
 There are cases where the snapshot returned by the hook starts after some
 initial events that the app already loaded from Postgres.
 
-To avoid losing or duplicating history, `persistSnapshot` applies:
+To avoid losing or duplicating history, `persistSnapshot` merges the known
+database prefix with `snapshot.events` using eve's stable event identity:
 
-- `preserveKnownInitialEvents(snapshot.events, knownInitialEvents)`
+- `event.meta.id`
 
-`preserveKnownInitialEvents` is prefix-aware. If the snapshot and known event log
-share a prefix, it preserves the right continuation instead of blindly
-concatenating arrays.
-
-Event comparison uses `areEqualJsonValues`, not `JSON.stringify`, so JSON object
-key order does not cause false mismatches.
+This is the same deduplication contract eve documents for reconnects and
+rewinds. Events from sessions written before stream event IDs existed fall back
+to structural JSON comparison.
 
 ## Pending Message Recovery
 
@@ -455,8 +455,10 @@ When a settled event arrives, the app saves the full snapshot and clears pending
 state.
 
 The resume overlay exists because the main `useEveAgent` instance was initialized
-from the loaded events. New resumed events are layered on top until the final
-snapshot catches up.
+from the loaded events. New resumed events are layered on top until the parent
+chat state contains their `meta.id` values. Clearing the overlay after that
+handoff cannot make text disappear because the persisted and hook event logs are
+merged by event identity.
 
 ## Cancelling A Response
 
@@ -621,9 +623,11 @@ input controls.
 Reasoning parts render as a collapsible block. While streaming, the label says
 "Thinking..." and uses shimmer text.
 
-The standalone `ThinkingMessage` appears when the session is busy but there is
-not yet enough assistant text to make progress feel visible, or while a response
-is still active. It fades out instead of disappearing abruptly.
+The standalone `ThinkingMessage` appears only while the session is busy and the
+latest assistant message has no renderable text, reasoning, tool, attachment, or
+authorization progress. It fades out as soon as real assistant output arrives;
+database finalization does not keep a stale thinking row under a completed
+answer.
 
 ## Composer Behavior
 
