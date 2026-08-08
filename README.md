@@ -14,7 +14,7 @@ Deploy the starter without provisioning a database or other Marketplace products
 
 Chats and eve session cursors are stored in that browser. They are not shared across browsers or users.
 Starter mode is intended for one trusted operator: anyone with the password
-shares the same agent identity and connection grants.
+shares the same agent identity.
 
 ## Deployment Modes
 
@@ -74,29 +74,18 @@ Other optional environment variables:
 # Override the app origin for custom production domains.
 BETTER_AUTH_URL=
 
-# Enable hosted Vercel Connect integrations.
+# Enable the hosted Slack channel.
 SLACK_CONNECTOR=
-LINEAR_CONNECTOR=
-NOTION_CONNECTOR=
-SENTRY_CONNECTOR=
 ```
 
-Create optional Vercel Connect integrations:
+Create the optional Slack channel integration:
 
 ```bash
-# Slack channel
 vercel connect create slack --name eve-chat-template --triggers
 vercel connect attach <slack-connector-uid> --triggers --trigger-path /eve/v1/slack --yes
-
-# MCP connections
-vercel connect create mcp.notion.com --name notion
-vercel connect create https://mcp.linear.app/mcp --name linear
-vercel connect create https://mcp.sentry.dev/mcp --name sentry
 ```
 
-The deploy button does not require these integrations. For manual setup, put the returned connector UIDs in `SLACK_CONNECTOR`, `NOTION_CONNECTOR`, `LINEAR_CONNECTOR`, and `SENTRY_CONNECTOR`. Local development falls back to `slack/eve-chat-template`, `notion`, `linear`, and `sentry`, so connectors created with the names above work without editing `agent/`.
-
-The composer only shows its connections menu when at least one MCP connector is configured. Password-only starter deployments therefore omit the menu and do not prompt eve to use unavailable connections.
+The deploy button does not require Slack. For manual setup, put the returned connector UID in `SLACK_CONNECTOR`. Local development falls back to `slack/eve-chat-template`, so a connector created with the name above works without editing `agent/`.
 
 If the connector is not attached to the linked project, run:
 
@@ -133,9 +122,7 @@ pnpm dev
 - Drizzle schema and migrations for production mode under `lib/db`
 - Saved eve session cursors and event snapshots in either storage mode
 - Sidebar history with delete and new-chat actions
-- Vercel Connect-backed Notion, Linear, and Sentry MCP connections
 - Vercel Connect-backed Slack channel route at `/eve/v1/slack`
-- Composer-level connections menu
 - First-message chat titles derived locally from the user's prompt
 - Streamdown markdown rendering for assistant text and reasoning
 - shadcn/Tailwind components for messages, tools, HITL prompts, and composer

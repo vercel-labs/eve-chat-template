@@ -680,22 +680,12 @@ function needsInputResponse(part: EveDynamicToolPart) {
 }
 
 function hasToolDetails(part: EveDynamicToolPart) {
-  if (isConnectionSearchTool(part)) {
-    return false;
-  }
-
   const hasInput = part.input !== undefined && formatPayload(part.input).trim().length > 0;
   const hasOutput =
     part.state === "output-available" && formatPayload(part.output).trim().length > 0;
   const hasError = part.state === "output-error" && part.errorText.trim().length > 0;
 
   return hasInput || hasOutput || hasError || Boolean(part.toolMetadata?.eve?.inputRequest);
-}
-
-function isConnectionSearchTool(part: EveDynamicToolPart) {
-  const normalized = normalizeToolName(resolveToolName(part));
-
-  return normalized.includes("connection") && normalized.includes("search");
 }
 
 function getToolStatus(part: EveDynamicToolPart): ToolStatus {
@@ -806,23 +796,6 @@ function describeToolAction(part: EveDynamicToolPart, status = getToolStatus(par
   const path = readString(input, ["path", "filePath", "filename"]);
   const command = readString(input, ["command", "cmd"]);
   const url = readString(input, ["url", "href"]);
-  const connection = readString(input, ["connection", "connectionName", "connector", "source"]);
-
-  if (normalized.includes("connection") && normalized.includes("search")) {
-    const verb = status === "running" ? "Searching" : "Searched";
-    const connectionName = resolveConnectionName(name, connection);
-
-    if (connectionName) {
-      return `${verb} ${formatDisplayName(connectionName)}`;
-    }
-
-    if (query && query !== "*") {
-      return `${verb} ${truncateInline(query, 72)}`;
-    }
-
-    return `${verb} connections`;
-  }
-
   if (normalized.includes("search") || normalized.includes("grep")) {
     return query ? `Searched ${truncateInline(query, 72)}` : `Searched ${formatToolName(name)}`;
   }
@@ -861,7 +834,6 @@ function resolveToolName(part: EveDynamicToolPart) {
 
 function formatToolName(name: string) {
   return normalizeToolName(name)
-    .replace(/^connection search$/, "connection search")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -872,41 +844,6 @@ function normalizeToolName(name: string) {
     .replace(/[_-]/g, " ")
     .trim()
     .toLowerCase();
-}
-
-function formatDisplayName(value: string) {
-  const cleaned = value
-    .replace(/^mcp\./, "")
-    .replace(/\.com(?:\/.*)?$/, "")
-    .replace(/[_-]/g, " ");
-
-  return cleaned
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function resolveConnectionName(toolName: string, inputConnection?: string | null) {
-  if (inputConnection && inputConnection !== "*") {
-    return inputConnection;
-  }
-
-  const tokens = normalizeToolName(toolName).split(/\s+/).filter(Boolean);
-
-  if (tokens[0] !== "connection" || tokens.length <= 2) {
-    return null;
-  }
-
-  const connectionTokens = tokens
-    .slice(1)
-    .filter((token) => token !== "search" && token !== "tool" && token !== "tools");
-
-  if (connectionTokens.length === 0) {
-    return null;
-  }
-
-  return [...new Set(connectionTokens)].join(" ");
 }
 
 function shortenPath(filepath: string) {

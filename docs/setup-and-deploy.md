@@ -1,6 +1,6 @@
 # Setup and Deployment
 
-This guide covers the database-free starter, local development, the production persistence upgrade, Sign in with Vercel, and optional connections.
+This guide covers the database-free starter, local development, the production persistence upgrade, Sign in with Vercel, and the optional Slack channel.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ EVE_CHAT_PASSWORD=
 Use a strong value; 16+ characters are recommended. The app exchanges it for a secure, HTTP-only session cookie. Chats and eve session cursors are stored in the current browser's localStorage, so history does not follow the user to another browser.
 
 Starter mode is for one trusted operator. Everyone who knows the password shares
-the same eve principal and any user-scoped connection grants. Upgrade to
+the same eve principal. Upgrade to
 production mode before giving independent users access.
 
 If `EVE_CHAT_PASSWORD` is absent and the full production environment is not configured, the deployment fails closed and does not allow chat requests.
@@ -231,44 +231,25 @@ PORT=3001 pnpm dev -p 3001
 
 Open the matching local URL and make sure the Vercel App contains the same callback URL.
 
-## Optional Vercel Connect Integrations
+## Optional Slack Channel
 
-Slack, Notion, Linear, and Sentry are optional and are not part of the required deploy button flow.
+Slack is optional and is not part of the required deploy button flow.
 
-Create any connectors you want to use:
+Create the Slack connector:
 
 ```bash
-# Slack channel
 vercel connect create slack --name eve-chat-template --triggers
 vercel connect attach <slack-connector-uid> --triggers --trigger-path /eve/v1/slack --yes
-
-# MCP connections
-vercel connect create mcp.notion.com --name notion
-vercel connect create https://mcp.linear.app/mcp --name linear
-vercel connect create https://mcp.sentry.dev/mcp --name sentry
 ```
 
-Attach it to the linked Vercel project if needed:
-
-```bash
-vercel connect attach <connector-uid> --yes
-```
-
-Set the matching environment variable to each connector UID:
+Set the matching environment variable to the connector UID:
 
 ```bash
 printf '%s' "<slack-connector-uid>" | vercel env add SLACK_CONNECTOR production preview development
-printf '%s' "<connector-uid>" | vercel env add NOTION_CONNECTOR production preview development
-printf '%s' "<connector-uid>" | vercel env add LINEAR_CONNECTOR production preview development
-printf '%s' "<connector-uid>" | vercel env add SENTRY_CONNECTOR production preview development
 vercel env pull .env.local --yes
 ```
 
-For local development, the connections fall back to `slack/eve-chat-template`, `notion`, `linear`, and `sentry`, so local connectors created with the names above can work without editing files under `agent/`.
-
-The composer only shows its connections menu when at least one MCP connector environment variable is configured. A password-only starter deployment omits the menu and tells eve that no external connections are available.
-
-If a chat requires MCP authorization, use the Connect card in the chat UI. If you want to manage a connector directly, open the project integrations/settings page in Vercel and find the connector.
+For local development, the channel falls back to `slack/eve-chat-template`, so a local connector created with the name above works without editing files under `agent/`.
 
 See [Deploy Button integrations](https://vercel.com/docs/integrations/deploy-button/integrations) for how storage products are declared in the deploy URL.
 
@@ -286,7 +267,7 @@ Deploy to production:
 vercel --prod
 ```
 
-After changing env vars, storage products, or Connect connectors, redeploy so production uses the newest project configuration.
+After changing env vars, storage products, or the Slack connector, redeploy so production uses the newest project configuration.
 
 ## Troubleshooting
 
@@ -305,8 +286,6 @@ If sign-in redirects to an auth error after the OAuth consent screen, confirm th
 If `pnpm db:migrate` says `DATABASE_URL` is missing, either run `vercel env run -e production -- pnpm db:migrate` for production or pull a Development-scoped Neon env var into `.env.local`.
 
 If rate limiting setup is missing, provision Upstash Redis and pull env vars again.
-
-If Notion tool calls fail, confirm that `NOTION_CONNECTOR` is set in Vercel, the connector is attached to the project, and local env vars have been pulled again.
 
 ## Useful Links
 

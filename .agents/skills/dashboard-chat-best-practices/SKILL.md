@@ -70,7 +70,6 @@ Use this skill to keep the template's web chat feeling like a polished dashboard
 - Use Streamdown for assistant markdown. Keep code blocks, lists, and inline code readable in both themes.
 - Group related dynamic tool parts into compact rows. Expand details only when there is useful input, output, error, or HITL control.
 - Render reasoning as a collapsible block. Label active reasoning as "Thinking..." and settled reasoning as "Reasoning".
-- Render connection authorization as a structured card, not prose embedded in assistant text.
 - Keep text inside controls and cards from overflowing at mobile widths. Prefer stable dimensions for buttons, tool rows, counters, and composer controls.
 
 ## Styling Rules

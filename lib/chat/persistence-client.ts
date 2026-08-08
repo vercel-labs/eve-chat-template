@@ -10,7 +10,6 @@ import {
   markChatPendingMessageAction,
   saveChatSessionStateAction,
   saveChatSnapshotAction,
-  skipChatAuthorizationAction,
 } from "@/app/actions/chat";
 import {
   appendLocalChatEvent,
@@ -22,7 +21,6 @@ import {
   markLocalChatPendingMessage,
   saveLocalChatSession,
   saveLocalChatSnapshot,
-  skipLocalChatAuthorization,
 } from "@/lib/chat/local-store";
 import type { StorageMode } from "@/lib/chat/types";
 
@@ -138,17 +136,4 @@ export async function saveClientChatSnapshot(
   }
 
   await saveChatSnapshotAction(input);
-}
-
-export async function skipClientChatAuthorization(
-  storageMode: StorageMode,
-  input: {
-    readonly chatId: string;
-    readonly events: readonly HandleMessageStreamEvent[];
-    readonly session: SessionState;
-  },
-) {
-  return storageMode === "browser"
-    ? skipLocalChatAuthorization(input)
-    : skipChatAuthorizationAction(input);
 }
