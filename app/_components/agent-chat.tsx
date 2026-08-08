@@ -429,11 +429,9 @@ export function AgentChatSession({
   const displayMessages = displayData.messages;
   const displayChatId = chatId ?? activeChatId ?? "new";
   const hasLocalPendingUserMessage = Boolean(localPendingUserMessage);
-  const hasOpenTurn = useMemo(() => hasOpenChatTurn(displayEvents), [displayEvents]);
   const isBusy =
     isResuming ||
     hasLocalPendingUserMessage ||
-    hasOpenTurn ||
     agent.status === "submitted" ||
     agent.status === "streaming";
   const isTurnBlocked = isBusy || isFinalizingTurn;
