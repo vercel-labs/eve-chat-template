@@ -46,7 +46,7 @@ export function ChatComposer({
 }) {
   const composerId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const textareaDisabled = disabled || isBusy || isPreparing;
+  const textareaDisabled = disabled || isPreparing;
   const trimmedValue = value.trim();
   const isOverMaxLength = getChatMessageLength(trimmedValue) > maxLength;
 
@@ -156,7 +156,7 @@ export function ChatComposer({
     </form>
   );
 
-  if (!disabledReason || (!disabled && !isBusy && !isPreparing)) {
+  if (!disabledReason || (!disabled && !isPreparing)) {
     return form;
   }
 

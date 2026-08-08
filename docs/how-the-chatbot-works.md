@@ -646,7 +646,8 @@ The composer:
 - auto-focuses when enabled
 - submits on Enter
 - inserts a newline on Shift+Enter
-- disables while a request is in flight
+- stays editable while a request is in flight so the next message can be drafted
+- blocks submission until eve emits the next ready boundary
 - shows a stop button when eve is busy
 - shows a spinner when the root page is creating a chat
 - wraps disabled states in a tooltip
