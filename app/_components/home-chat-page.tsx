@@ -19,6 +19,7 @@ import type { SetupStatus } from "@/lib/chat/types";
 
 const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
   isBusy: false,
+  isCancelling: false,
   isDisabled: false,
   isEmpty: true,
 };

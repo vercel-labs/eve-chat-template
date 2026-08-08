@@ -65,12 +65,14 @@ export type AgentChatController = {
 export type AgentChatControllerStatus = {
   readonly disabledReason?: string;
   readonly isBusy: boolean;
+  readonly isCancelling: boolean;
   readonly isDisabled: boolean;
   readonly isEmpty: boolean;
 };
 
 const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
   isBusy: false,
+  isCancelling: false,
   isDisabled: false,
   isEmpty: true,
 };
@@ -91,18 +93,18 @@ function reduceEventsToMessageData(
   return data;
 }
 
-function hasOpenChatTurn(events: readonly MessageStreamEvent[]) {
-  let open = false;
+function getOpenChatTurnId(events: readonly MessageStreamEvent[]) {
+  let turnId: string | undefined;
 
   for (const event of events) {
     if (event.type === "turn.started") {
-      open = true;
+      turnId = event.data.turnId;
     } else if (isChatTurnSettledEvent(event)) {
-      open = false;
+      turnId = undefined;
     }
   }
 
-  return open;
+  return turnId;
 }
 
 function isAbortError(error: unknown) {
@@ -144,6 +146,7 @@ export function AgentChatSession({
   const [resumedEvents, setResumedEvents] = useState<MessageStreamEvent[]>([]);
   const [isResuming, setIsResuming] = useState(false);
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
+  const [isCancellationRequested, setIsCancellationRequested] = useState(false);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
@@ -188,6 +191,7 @@ export function AgentChatSession({
       .catch((error: unknown) => {
         cancellationRequestedRef.current = false;
         cancellationSentTurnIdRef.current = undefined;
+        setIsCancellationRequested(false);
         setClientError(
           error instanceof Error ? error.message : "Failed to stop the response.",
         );
@@ -195,7 +199,12 @@ export function AgentChatSession({
   }, []);
 
   const requestCancellation = useCallback(() => {
+    if (cancellationRequestedRef.current) {
+      return;
+    }
+
     cancellationRequestedRef.current = true;
+    setIsCancellationRequested(true);
     setClientError(null);
 
     if (currentTurnIdRef.current) {
@@ -287,6 +296,7 @@ export function AgentChatSession({
         cancellationRequestedRef.current = false;
         cancellationSentTurnIdRef.current = undefined;
         currentTurnIdRef.current = undefined;
+        setIsCancellationRequested(false);
       } catch (error) {
         setClientError(error instanceof Error ? error.message : "Failed to save chat.");
       } finally {
@@ -338,6 +348,7 @@ export function AgentChatSession({
         currentTurnIdRef.current = undefined;
         cancellationRequestedRef.current = false;
         cancellationSentTurnIdRef.current = undefined;
+        setIsCancellationRequested(false);
       }
       const chatId = activeChatIdRef.current;
 
@@ -473,6 +484,7 @@ export function AgentChatSession({
     currentTurnIdRef.current = undefined;
     cancellationRequestedRef.current = false;
     cancellationSentTurnIdRef.current = undefined;
+    setIsCancellationRequested(false);
     failedSendRecoveryRef.current = null;
     setResumedEvents([]);
     stopFinalizingTurn();
@@ -566,6 +578,7 @@ export function AgentChatSession({
       cancellationRequestedRef.current = false;
       cancellationSentTurnIdRef.current = undefined;
       currentTurnIdRef.current = undefined;
+      setIsCancellationRequested(false);
       failedSendRecoveryRef.current = restoreAfterFailedSend;
 
       try {
@@ -738,9 +751,9 @@ export function AgentChatSession({
     const abortController = new AbortController();
     const existingEvents = activeChat.events;
     const pendingMessageText = pendingUserMessage ?? null;
-    const shouldResumeOpenTurn = hasOpenChatTurn(existingEvents);
+    const openTurnId = getOpenChatTurnId(existingEvents);
 
-    if (!pendingMessageText && !shouldResumeOpenTurn) {
+    if (!pendingMessageText && !openTurnId) {
       return;
     }
 
@@ -759,6 +772,7 @@ export function AgentChatSession({
     let completed = false;
 
     resumeStartedRef.current = true;
+    currentTurnIdRef.current = openTurnId;
     resumedEventsRef.current = [];
     setResumedEvents([]);
     setIsResuming(true);
@@ -782,6 +796,19 @@ export function AgentChatSession({
             continue;
           }
           isFirstEvent = false;
+
+          if (event.type === "turn.started") {
+            currentTurnIdRef.current = event.data.turnId;
+
+            if (cancellationRequestedRef.current) {
+              cancelTurn(event.data.turnId);
+            }
+          } else if (isChatTurnSettledEvent(event)) {
+            currentTurnIdRef.current = undefined;
+            cancellationRequestedRef.current = false;
+            cancellationSentTurnIdRef.current = undefined;
+            setIsCancellationRequested(false);
+          }
 
           const nextEvents = appendUniqueStreamEvent(resumedEventsRef.current, event);
           resumedEventsRef.current = nextEvents;
@@ -825,6 +852,10 @@ export function AgentChatSession({
         });
 
         onPendingUserMessageSettled?.();
+        currentTurnIdRef.current = undefined;
+        cancellationRequestedRef.current = false;
+        cancellationSentTurnIdRef.current = undefined;
+        setIsCancellationRequested(false);
         completed = true;
       } catch (error) {
         if (!cancelled && !isAbortError(error)) {
@@ -849,6 +880,7 @@ export function AgentChatSession({
     activeChat?.id,
     activeChat?.session,
     agent.status,
+    cancelTurn,
     onActiveChatUpdated,
     onPendingUserMessageSettled,
     pendingUserMessage,
@@ -903,6 +935,7 @@ export function AgentChatSession({
       {
         disabledReason,
         isBusy,
+        isCancelling: isCancellationRequested,
         isDisabled: !isSetupReady || isFinalizingTurn,
         isEmpty,
       },
@@ -910,6 +943,7 @@ export function AgentChatSession({
   }, [
     disabledReason,
     isBusy,
+    isCancellationRequested,
     isFinalizingTurn,
     isEmpty,
     isSetupReady,

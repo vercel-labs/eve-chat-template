@@ -467,7 +467,10 @@ The composer stop button requests durable cancellation with
 eve emits `turn.cancelled` and `session.waiting`, so the final cursor and event
 snapshot remain resumable. `useEveAgent.stop()` is intentionally reserved for
 unmount/reset because it only detaches the browser stream and does not stop the
-server-side turn.
+server-side turn. If the app resumes an interrupted stream, it restores the open
+turn ID from the persisted event prefix before exposing cancellation. After a
+cancel request is sent, the control becomes a disabled stopping indicator until
+eve confirms the turn boundary.
 
 ## Auth
 

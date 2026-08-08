@@ -23,6 +23,7 @@ export function ChatComposer({
   footerStart,
   isBusy = false,
   isPreparing = false,
+  isStopping = false,
   maxLength = MAX_CHAT_MESSAGE_CHARS,
   onChange,
   onStop,
@@ -37,6 +38,7 @@ export function ChatComposer({
   readonly footerStart?: ReactNode;
   readonly isBusy?: boolean;
   readonly isPreparing?: boolean;
+  readonly isStopping?: boolean;
   readonly maxLength?: number;
   readonly onChange: (value: string) => void;
   readonly onStop: () => void;
@@ -122,13 +124,18 @@ export function ChatComposer({
         <div className="flex shrink-0 items-center">
           {isBusy ? (
             <Button
-              aria-label="Stop response"
+              aria-label={isStopping ? "Stopping response" : "Stop response"}
               className="size-6 cursor-pointer rounded-md bg-foreground/15 text-foreground/55 shadow-none hover:bg-foreground/25"
+              disabled={isStopping}
               onClick={onStop}
               size="icon-xs"
               type="button"
             >
-              <SquareIcon className="size-2.5 fill-current" />
+              {isStopping ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                <SquareIcon className="size-2.5 fill-current" />
+              )}
             </Button>
           ) : isPreparing ? (
             <Button

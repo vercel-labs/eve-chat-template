@@ -29,6 +29,7 @@ import type { ActiveChat, SetupStatus } from "@/lib/chat/types";
 
 const IDLE_CONTROLLER_STATUS: AgentChatControllerStatus = {
   isBusy: false,
+  isCancelling: false,
   isDisabled: false,
   isEmpty: true,
 };
@@ -309,6 +310,7 @@ export function SessionChatPage({
       setControllerReady(Boolean(controller));
       setControllerStatus((current) =>
         current.isBusy === status.isBusy &&
+        current.isCancelling === status.isCancelling &&
         current.isDisabled === status.isDisabled &&
         current.isEmpty === status.isEmpty
           ? current
@@ -402,6 +404,7 @@ export function SessionChatPage({
             disabledReason={composerDisabledReason}
             footerStart={<ComposerFooterControls setupStatus={setupStatus} />}
             isBusy={controllerStatus.isBusy}
+            isStopping={controllerStatus.isCancelling}
             onChange={setDraft}
             onStop={handleComposerStop}
             onSubmit={handleComposerSubmit}
