@@ -655,12 +655,14 @@ The composer:
 - shows a spinner when the root page is creating a chat
 - wraps disabled states in a tooltip
 
-For ordinary turns, the stop/send control follows the canonical
-`useEveAgent.status` lifecycle (`submitted` or `streaming` means busy). The
-persisted event log is inspected only when deciding whether an interrupted
-session needs to resume; it is not a second busy-state latch. This lets the stop
-button return to send as soon as eve reaches the current turn boundary, even if
-the saved event snapshot is still being finalized.
+For ordinary turns, the stop/send control follows `useEveAgent.status` while an
+actual turn is open. A `submitted` status is busy immediately; a `streaming`
+status is busy only until the agent's in-memory event log reaches
+`session.waiting`. This keeps eve's durable turn boundary authoritative while
+also covering the transient render between receiving that boundary and the
+store publishing its following `ready` snapshot. Persisted events are still
+used only to decide whether an interrupted session needs to resume, so database
+snapshot finalization cannot become a second busy-state latch.
 
 Root and session pages render the same composer component, but they place it
 differently:
