@@ -25,6 +25,7 @@ export function ChatComposer({
   isPreparing = false,
   maxLength = MAX_CHAT_MESSAGE_CHARS,
   onChange,
+  onStop,
   onSubmit,
   placeholder = "Ask eve anything...",
   value,
@@ -121,9 +122,9 @@ export function ChatComposer({
         <div className="flex shrink-0 items-center">
           {isBusy ? (
             <Button
-              aria-label="Response in progress"
-              className="size-6 cursor-default rounded-md bg-foreground/15 text-foreground/55 shadow-none hover:bg-foreground/15 disabled:cursor-default disabled:pointer-events-auto disabled:opacity-100"
-              disabled
+              aria-label="Stop response"
+              className="size-6 cursor-pointer rounded-md bg-foreground/15 text-foreground/55 shadow-none hover:bg-foreground/25"
+              onClick={onStop}
               size="icon-xs"
               type="button"
             >

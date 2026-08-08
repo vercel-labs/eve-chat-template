@@ -4,7 +4,7 @@ import type {
   ClientSessionState,
   EveAgentStoreSnapshot,
   EveMessageData,
-  HandleMessageStreamEvent,
+  MessageStreamEvent,
 } from "eve/client";
 import { Client } from "eve/client";
 import type { EveMessage } from "eve/react";
@@ -42,7 +42,7 @@ import { cn } from "@/lib/utils";
 
 type AgentSnapshot = EveAgentStoreSnapshot<EveMessageData>;
 type PendingPersistedEvent = {
-  readonly event: HandleMessageStreamEvent;
+  readonly event: MessageStreamEvent;
   readonly eventIndex: number;
 };
 type TurnTiming = {
@@ -79,7 +79,7 @@ const THINKING_EXIT_DURATION_MS = 180;
 const STREAM_EVENT_BATCH_DELAY_MS = 500;
 
 function reduceEventsToMessageData(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): EveMessageData {
   const reducer = defaultMessageReducer();
   let data = reducer.initial();
@@ -91,7 +91,7 @@ function reduceEventsToMessageData(
   return data;
 }
 
-function hasOpenChatTurn(events: readonly HandleMessageStreamEvent[]) {
+function hasOpenChatTurn(events: readonly MessageStreamEvent[]) {
   let open = false;
 
   for (const event of events) {
@@ -106,9 +106,9 @@ function hasOpenChatTurn(events: readonly HandleMessageStreamEvent[]) {
 }
 
 function namespaceStreamEvent(
-  event: HandleMessageStreamEvent,
+  event: MessageStreamEvent,
   namespace: string | undefined,
-): HandleMessageStreamEvent {
+): MessageStreamEvent {
   if (!namespace) {
     return event;
   }
@@ -138,7 +138,7 @@ function namespaceStreamEvent(
       ...event.data,
       turnId: `${prefix}${turnId}`,
     },
-  } as HandleMessageStreamEvent;
+  } as MessageStreamEvent;
 }
 
 function isAbortError(error: unknown) {
@@ -177,10 +177,10 @@ export function AgentChatSession({
   const [currentTitle, setCurrentTitle] = useState(activeChat?.title ?? "New chat");
   const [clientError, setClientError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
-  const [resumedEvents, setResumedEvents] = useState<HandleMessageStreamEvent[]>([]);
+  const [resumedEvents, setResumedEvents] = useState<MessageStreamEvent[]>([]);
   const [isResuming, setIsResuming] = useState(false);
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
-  const [streamEvents, setStreamEvents] = useState<HandleMessageStreamEvent[]>([]);
+  const [streamEvents, setStreamEvents] = useState<MessageStreamEvent[]>([]);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
@@ -190,20 +190,56 @@ export function AgentChatSession({
   const activeChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
   const eventIndexRef = useRef(activeChat?.events.length ?? 0);
   const eventIndexChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
-  const knownInitialEventsRef = useRef<readonly HandleMessageStreamEvent[]>(
+  const knownInitialEventsRef = useRef<readonly MessageStreamEvent[]>(
     activeChat?.events ?? [],
   );
   const currentTitleRef = useRef(activeChat?.title ?? "New chat");
   const resumeStartedRef = useRef(false);
-  const resumedEventsRef = useRef<HandleMessageStreamEvent[]>([]);
-  const streamEventsRef = useRef<HandleMessageStreamEvent[]>([]);
+  const resumedEventsRef = useRef<MessageStreamEvent[]>([]);
+  const streamEventsRef = useRef<MessageStreamEvent[]>([]);
   const currentSessionRef = useRef<ClientSessionState | undefined>(activeChat?.session);
   const pendingEventBatchRef = useRef<PendingPersistedEvent[]>([]);
   const persistEventTimerRef = useRef<number | null>(null);
   const turnTimingRef = useRef<TurnTiming | null>(null);
+  const eveClientRef = useRef<Client | null>(null);
+  const currentTurnIdRef = useRef<string | undefined>(undefined);
+  const cancellationRequestedRef = useRef(false);
+  const cancellationSentTurnIdRef = useRef<string | undefined>(undefined);
+  const failedSendRecoveryRef = useRef<(() => void) | null>(null);
+  eveClientRef.current ??= new Client({ host: "" });
   const isSetupReady = setupStatus.appReady;
   const storageMode = setupStatus.storageMode;
   const router = useRouter();
+
+  const cancelTurn = useCallback((turnId: string) => {
+    const sessionId = currentSessionRef.current?.sessionId;
+
+    if (!sessionId || cancellationSentTurnIdRef.current === turnId) {
+      return;
+    }
+
+    cancellationSentTurnIdRef.current = turnId;
+
+    void eveClientRef.current?.sessions
+      .attach(sessionId)
+      .cancel({ turnId })
+      .catch((error: unknown) => {
+        cancellationRequestedRef.current = false;
+        cancellationSentTurnIdRef.current = undefined;
+        setClientError(
+          error instanceof Error ? error.message : "Failed to stop the response.",
+        );
+      });
+  }, []);
+
+  const requestCancellation = useCallback(() => {
+    cancellationRequestedRef.current = true;
+    setClientError(null);
+
+    if (currentTurnIdRef.current) {
+      cancelTurn(currentTurnIdRef.current);
+    }
+  }, [cancelTurn]);
 
   const startFinalizingTurn = useCallback(() => {
     setIsFinalizingTurn(true);
@@ -241,13 +277,18 @@ export function AgentChatSession({
         return;
       }
 
+      if (!snapshot.session) {
+        const recoverFailedSend = failedSendRecoveryRef.current;
+        failedSendRecoveryRef.current = null;
+        recoverFailedSend?.();
+        void clearClientChatPendingMessage(storageMode, chatId).catch(() => {});
+        stopFinalizingTurn();
+        return;
+      }
+
       setClientError(null);
 
       try {
-        if (!snapshot.session) {
-          throw new Error("eve did not return a resumable session.");
-        }
-
         if (persistEventTimerRef.current !== null) {
           window.clearTimeout(persistEventTimerRef.current);
           persistEventTimerRef.current = null;
@@ -289,7 +330,10 @@ export function AgentChatSession({
           title: currentTitleRef.current,
         });
         onPendingUserMessageSettled?.();
-
+        failedSendRecoveryRef.current = null;
+        cancellationRequestedRef.current = false;
+        cancellationSentTurnIdRef.current = undefined;
+        currentTurnIdRef.current = undefined;
       } catch (error) {
         setClientError(error instanceof Error ? error.message : "Failed to save chat.");
       } finally {
@@ -328,11 +372,25 @@ export function AgentChatSession({
   }, [storageMode, viewer]);
 
   const persistStreamEvent = useCallback(
-    (event: HandleMessageStreamEvent) => {
+    (event: MessageStreamEvent) => {
       const displayEvent = namespaceStreamEvent(
         event,
         currentSessionRef.current?.sessionId,
       );
+
+      if (event.type === "turn.started") {
+        currentTurnIdRef.current = event.data.turnId;
+
+        if (cancellationRequestedRef.current) {
+          cancelTurn(event.data.turnId);
+        }
+      } else if (event.type === "message.received") {
+        failedSendRecoveryRef.current = null;
+      } else if (isChatTurnSettledEvent(event)) {
+        currentTurnIdRef.current = undefined;
+        cancellationRequestedRef.current = false;
+        cancellationSentTurnIdRef.current = undefined;
+      }
       const nextStreamEvents = appendUniqueStreamEvent(
         streamEventsRef.current,
         displayEvent,
@@ -364,7 +422,7 @@ export function AgentChatSession({
         }, STREAM_EVENT_BATCH_DELAY_MS);
       }
     },
-    [flushEventBatch, viewer],
+    [cancelTurn, flushEventBatch, viewer],
   );
 
   const persistSessionState = useCallback(
@@ -394,6 +452,7 @@ export function AgentChatSession({
     initialSession: activeChat?.session,
     onEvent: persistStreamEvent,
     onFinish: (snapshot) => {
+      startFinalizingTurn();
       void persistSnapshot(snapshot);
     },
     onSessionChange: (session) => {
@@ -463,6 +522,10 @@ export function AgentChatSession({
     resumedEventsRef.current = [];
     streamEventsRef.current = [];
     currentSessionRef.current = undefined;
+    currentTurnIdRef.current = undefined;
+    cancellationRequestedRef.current = false;
+    cancellationSentTurnIdRef.current = undefined;
+    failedSendRecoveryRef.current = null;
     setResumedEvents([]);
     setStreamEvents([]);
     stopFinalizingTurn();
@@ -553,6 +616,10 @@ export function AgentChatSession({
       showLocalPendingMessage();
       onPendingUserMessageSettled?.(message);
       turnTimingRef.current = { startedAt: performance.now() };
+      cancellationRequestedRef.current = false;
+      cancellationSentTurnIdRef.current = undefined;
+      currentTurnIdRef.current = undefined;
+      failedSendRecoveryRef.current = restoreAfterFailedSend;
 
       try {
         ready = await prepareSend(message);
@@ -561,6 +628,7 @@ export function AgentChatSession({
         }
       } catch (error) {
         turnTimingRef.current = null;
+        failedSendRecoveryRef.current = null;
         restoreAfterFailedSend(
           error instanceof Error ? error.message : "Failed to prepare chat.",
         );
@@ -569,6 +637,7 @@ export function AgentChatSession({
 
       if (!ready) {
         turnTimingRef.current = null;
+        failedSendRecoveryRef.current = null;
         const chatId = activeChatIdRef.current;
 
         if (chatId) {
@@ -582,15 +651,16 @@ export function AgentChatSession({
 
       if (!chatId) {
         turnTimingRef.current = null;
+        failedSendRecoveryRef.current = null;
         restoreAfterFailedSend("Chat is still getting ready.");
         return;
       }
 
       try {
-        startFinalizingTurn();
         await agent.send(message);
       } catch (error) {
         turnTimingRef.current = null;
+        failedSendRecoveryRef.current = null;
 
         if (isAbortError(error)) {
           stopFinalizingTurn();
@@ -610,11 +680,9 @@ export function AgentChatSession({
       prepareSend,
       requestSignIn,
       setLocalPendingUserMessage,
-      startFinalizingTurn,
       storageMode,
       stopFinalizingTurn,
       onPendingUserMessageSettled,
-      touchChat,
       viewer,
     ],
   );
@@ -649,7 +717,6 @@ export function AgentChatSession({
       }
 
       try {
-        startFinalizingTurn();
         await agent.respond(responses);
       } catch (error) {
         stopFinalizingTurn();
@@ -660,7 +727,6 @@ export function AgentChatSession({
       agent,
       isTurnBlocked,
       requestSignIn,
-      startFinalizingTurn,
       stopFinalizingTurn,
       storageMode,
       viewer,
@@ -733,7 +799,7 @@ export function AgentChatSession({
       return;
     }
 
-    const startIndex = activeChat.session.streamIndex;
+    const startIndex = existingEvents.length;
     const shouldIgnoreLeadingWaiting =
       pendingMessageText !== null &&
       !hasLatestUserMessage(
@@ -874,7 +940,7 @@ export function AgentChatSession({
       {
         reset: resetSession,
         sendMessage,
-        stop: agent.stop,
+        stop: requestCancellation,
       },
       {
         disabledReason,
@@ -884,13 +950,13 @@ export function AgentChatSession({
       },
     );
   }, [
-    agent.stop,
     disabledReason,
     isBusy,
     isFinalizingTurn,
     isEmpty,
     isSetupReady,
     onControllerChange,
+    requestCancellation,
     resetSession,
     sendMessage,
   ]);
@@ -949,14 +1015,14 @@ export function AgentChatSession({
 }
 
 function mergeStreamEventLogs(
-  events: readonly HandleMessageStreamEvent[],
-  streamedEvents: readonly HandleMessageStreamEvent[],
-): HandleMessageStreamEvent[] {
+  events: readonly MessageStreamEvent[],
+  streamedEvents: readonly MessageStreamEvent[],
+): MessageStreamEvent[] {
   if (streamedEvents.length === 0) {
-    return events as HandleMessageStreamEvent[];
+    return events as MessageStreamEvent[];
   }
 
-  let merged: HandleMessageStreamEvent[] = [...events];
+  let merged: MessageStreamEvent[] = [...events];
 
   for (const event of streamedEvents) {
     const next = appendUniqueStreamEvent(merged, event);
@@ -970,19 +1036,19 @@ function mergeStreamEventLogs(
 }
 
 function appendUniqueStreamEvent(
-  events: readonly HandleMessageStreamEvent[],
-  event: HandleMessageStreamEvent,
-): HandleMessageStreamEvent[] {
+  events: readonly MessageStreamEvent[],
+  event: MessageStreamEvent,
+): MessageStreamEvent[] {
   if (events.some((existingEvent) => areSameStreamEvent(existingEvent, event))) {
-    return events as HandleMessageStreamEvent[];
+    return events as MessageStreamEvent[];
   }
 
   return [...events, event];
 }
 
 function preserveKnownInitialEvents(
-  snapshotEvents: readonly HandleMessageStreamEvent[],
-  knownEvents: readonly HandleMessageStreamEvent[],
+  snapshotEvents: readonly MessageStreamEvent[],
+  knownEvents: readonly MessageStreamEvent[],
 ) {
   if (knownEvents.length === 0) {
     return snapshotEvents;
@@ -1010,8 +1076,8 @@ function preserveKnownInitialEvents(
 }
 
 function countSharedEventPrefix(
-  events: readonly HandleMessageStreamEvent[],
-  knownEvents: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
+  knownEvents: readonly MessageStreamEvent[],
 ) {
   const count = Math.min(events.length, knownEvents.length);
 
@@ -1025,8 +1091,8 @@ function countSharedEventPrefix(
 }
 
 function areSameStreamEvent(
-  left: HandleMessageStreamEvent,
-  right: HandleMessageStreamEvent | undefined,
+  left: MessageStreamEvent,
+  right: MessageStreamEvent | undefined,
 ) {
   return right !== undefined && areEqualJsonValues(left, right);
 }

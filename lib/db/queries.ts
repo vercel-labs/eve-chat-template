@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, lt, or, sql } from "drizzle-orm";
-import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
+import type { ClientSessionState, MessageStreamEvent } from "eve/client";
 import { isChatTurnSettledEvent } from "@/lib/chat/events";
 import type { ActiveChat, ChatListItem, ChatListPage } from "@/lib/chat/types";
 import { createFallbackTitle, DEFAULT_CHAT_TITLE } from "@/lib/chat/title";
@@ -255,7 +255,7 @@ export async function appendChatEvents({
 }: {
   readonly chatId: string;
   readonly events: readonly {
-    readonly event: HandleMessageStreamEvent;
+    readonly event: MessageStreamEvent;
     readonly eventIndex: number;
   }[];
   readonly userId: string;
@@ -281,7 +281,7 @@ export async function appendChatEvents({
         chatId,
         event,
         eventIndex,
-        id: randomUUID(),
+        id: event.meta.id || randomUUID(),
       })),
     )
     .onConflictDoUpdate({
@@ -297,7 +297,7 @@ export async function saveChatSnapshot({
   userId,
 }: {
   readonly chatId: string;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly session: ClientSessionState;
   readonly userId: string;
 }) {
@@ -319,7 +319,7 @@ export async function saveChatSnapshot({
           chatId,
           event,
           eventIndex,
-          id: randomUUID(),
+          id: event.meta.id || randomUUID(),
         })),
       )
       .onConflictDoUpdate({

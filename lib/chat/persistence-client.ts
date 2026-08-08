@@ -1,13 +1,12 @@
 "use client";
 
-import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
+import type { ClientSessionState, MessageStreamEvent } from "eve/client";
 import {
   appendChatEventsAction,
   checkSendLimitAction,
   clearChatPendingMessageAction,
   createChatAction,
   deleteChatAction,
-  markChatPendingMessageAction,
   prepareChatSendAction,
   saveChatSessionStateAction,
   saveChatSnapshotAction,
@@ -89,15 +88,6 @@ export async function prepareClientChatSend(
   return prepareChatSendAction(input);
 }
 
-export async function markClientChatPendingMessage(
-  storageMode: StorageMode,
-  input: { readonly chatId: string; readonly message: string },
-) {
-  return storageMode === "browser"
-    ? markLocalChatPendingMessage(input.chatId, input.message)
-    : markChatPendingMessageAction(input);
-}
-
 export async function clearClientChatPendingMessage(
   storageMode: StorageMode,
   chatId: string,
@@ -115,7 +105,7 @@ export async function appendClientChatEvents(
   input: {
     readonly chatId: string;
     readonly events: readonly {
-      readonly event: HandleMessageStreamEvent;
+      readonly event: MessageStreamEvent;
       readonly eventIndex: number;
     }[];
   },
@@ -144,7 +134,7 @@ export async function saveClientChatSnapshot(
   storageMode: StorageMode,
   input: {
     readonly chatId: string;
-    readonly events: readonly HandleMessageStreamEvent[];
+    readonly events: readonly MessageStreamEvent[];
     readonly session: ClientSessionState;
   },
 ) {

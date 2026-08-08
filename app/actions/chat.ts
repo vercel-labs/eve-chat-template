@@ -1,6 +1,6 @@
 "use server";
 
-import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
+import type { ClientSessionState, MessageStreamEvent } from "eve/client";
 import {
   appendChatEvents,
   clearChatPendingMessage,
@@ -106,7 +106,7 @@ export async function prepareChatSendAction(input: {
 
 export async function saveChatSnapshotAction(input: {
   readonly chatId: string;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly session: ClientSessionState;
 }) {
   const viewer = await requireViewer();
@@ -119,21 +119,6 @@ export async function saveChatSnapshotAction(input: {
   });
 
   return { ok: true };
-}
-
-export async function markChatPendingMessageAction(input: {
-  readonly chatId: string;
-  readonly message: string;
-}) {
-  const viewer = await requireViewer();
-
-  assertChatMessageLength(input.message);
-
-  return markChatPendingMessage({
-    chatId: input.chatId,
-    message: input.message,
-    userId: viewer.id,
-  });
 }
 
 export async function clearChatPendingMessageAction(chatId: string) {
@@ -150,7 +135,7 @@ export async function clearChatPendingMessageAction(chatId: string) {
 export async function appendChatEventsAction(input: {
   readonly chatId: string;
   readonly events: readonly {
-    readonly event: HandleMessageStreamEvent;
+    readonly event: MessageStreamEvent;
     readonly eventIndex: number;
   }[];
 }) {

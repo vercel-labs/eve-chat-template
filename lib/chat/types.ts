@@ -1,4 +1,4 @@
-import type { ClientSessionState, HandleMessageStreamEvent } from "eve/client";
+import type { ClientSessionState, MessageStreamEvent } from "eve/client";
 
 export type Viewer = {
   readonly email: string;
@@ -22,7 +22,7 @@ export type ChatListPage = {
 };
 
 export type ActiveChat = {
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly id: string;
   readonly pendingUserMessage: string | null;
   readonly session: ClientSessionState | undefined;

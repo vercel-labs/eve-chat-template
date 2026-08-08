@@ -72,7 +72,7 @@ Production mode stores eve stream events in ordered rows:
 
 ```ts
 chat_event.eventIndex: number
-chat_event.event: HandleMessageStreamEvent
+chat_event.event: MessageStreamEvent
 ```
 
 Starter mode keeps the same two values in a versioned localStorage record.
@@ -441,9 +441,9 @@ cursor:
 ```ts
 client.sessions
   .attach(activeChat.session.sessionId, {
-    streamIndex: activeChat.session.streamIndex,
+    streamIndex: activeChat.events.length,
   })
-  .stream({ startIndex: activeChat.session.streamIndex })
+  .stream({ startIndex: activeChat.events.length })
 ```
 
 Each resumed event is:
@@ -457,6 +457,15 @@ state.
 The resume overlay exists because the main `useEveAgent` instance was initialized
 from the loaded events. New resumed events are layered on top until the final
 snapshot catches up.
+
+## Cancelling A Response
+
+The composer stop button requests durable cancellation with
+`ClientSession.cancel({ turnId })`. The browser keeps consuming the stream until
+eve emits `turn.cancelled` and `session.waiting`, so the final cursor and event
+snapshot remain resumable. `useEveAgent.stop()` is intentionally reserved for
+unmount/reset because it only detaches the browser stream and does not stop the
+server-side turn.
 
 ## Auth
 
