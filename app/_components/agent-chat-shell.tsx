@@ -16,11 +16,7 @@ import {
   CHAT_BOOTSTRAP_SYNC_EVENT,
   type ChatBootstrapSyncDetail,
 } from "@/app/_components/agent-chat-events";
-import {
-  ChatShellProvider,
-  useChatShell,
-  type EnabledConnections,
-} from "@/app/_components/chat-shell-context";
+import { ChatShellProvider, useChatShell } from "@/app/_components/chat-shell-context";
 import { AuthDisplayLoggedOut } from "@/components/auth/auth-display";
 import { SignInModal } from "@/components/auth/sign-in-modal";
 import { ChatSidebar } from "@/components/chat/sidebar";
@@ -64,11 +60,6 @@ export function AgentChatShell({
   const [viewerState, setViewerState] = useState(viewer);
   const [setupStatusState, setSetupStatusState] = useState(setupStatus);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [enabledConnections, setEnabledConnections] = useState<EnabledConnections>({
-    linear: true,
-    notion: true,
-    sentry: true,
-  });
   const cursorRef = useRef(initialNextCursor);
   const activeChatIdRef = useRef(activeChatId);
   const setupReady = setupStatusState.appReady;
@@ -102,16 +93,6 @@ export function AgentChatShell({
     setSidebarDocumentHint(open);
     document.cookie = `${SIDEBAR_COOKIE_NAME}=${serializeSidebarOpen(open)}; Path=/; Max-Age=${SIDEBAR_COOKIE_MAX_AGE}; SameSite=Lax`;
   }, []);
-
-  const setConnectionEnabled = useCallback(
-    (connection: keyof EnabledConnections, enabled: boolean) => {
-      setEnabledConnections((current) => ({
-        ...current,
-        [connection]: enabled,
-      }));
-    },
-    [],
-  );
 
   const touchChat = useCallback((chat: ChatListItem) => {
     setHistory((items) => {
@@ -257,11 +238,9 @@ export function AgentChatShell({
     () => ({
       activeChatId,
       desktopSidebarOpen,
-      enabledConnections,
       removeChat,
       requestSignIn,
       setActiveChatId,
-      setConnectionEnabled,
       setupStatus: setupStatusState,
       touchChat,
       updateChatTitle,
@@ -270,10 +249,8 @@ export function AgentChatShell({
     [
       activeChatId,
       desktopSidebarOpen,
-      enabledConnections,
       removeChat,
       requestSignIn,
-      setConnectionEnabled,
       setupStatusState,
       touchChat,
       updateChatTitle,

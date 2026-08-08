@@ -26,9 +26,6 @@ Important files:
 | `agent/agent.ts` | Defines the eve agent and model. |
 | `agent/channels/eve.ts` | Configures the eve web channel and auth adapters. |
 | `agent/channels/slack.ts` | Configures the Slack channel route and Vercel Connect credentials. |
-| `agent/connections/notion.ts` | Defines the Notion MCP connection through Vercel Connect. |
-| `agent/connections/linear.ts` | Defines the Linear MCP connection through Vercel Connect. |
-| `agent/connections/sentry.ts` | Defines the Sentry MCP connection through Vercel Connect. |
 | `next.config.ts` | Wraps the app with `withEve(nextConfig)`, which mounts the `/eve/v1/*` routes. |
 | `app/(chat)/layout.tsx` | Renders the static chat shell immediately, then streams viewer/setup/sidebar data through Suspense. |
 | `app/(chat)/page.tsx` | Root chat screen. Creates a new chat row and navigates into `/chat/[id]`. |
@@ -36,12 +33,11 @@ Important files:
 | `app/_components/agent-chat-shell.tsx` | Client shell for sidebar state, history pagination, auth modal, and shared chat context. |
 | `app/_components/home-chat-page.tsx` | Root-page composer and logo experience. |
 | `app/_components/session-chat-page.tsx` | Session-page composer, active chat sync, and controller wiring. |
-| `app/_components/agent-chat.tsx` | The eve client bridge: sending, streaming, persistence, resume, pending auth, and display state. |
+| `app/_components/agent-chat.tsx` | The eve client bridge: sending, streaming, persistence, resume, and display state. |
 | `components/chat/composer.tsx` | The controlled chat input. |
 | `components/chat/message.tsx` | Renders eve messages, markdown, reasoning, tools, and input requests. |
 | `components/chat/sidebar.tsx` | Paginated chat history sidebar. |
-| `components/chat/integrations-menu.tsx` | Per-turn connection toggle UI. |
-| `app/actions/chat.ts` | Server actions for chat creation, persistence, pending state, skip auth, and rate checks. |
+| `app/actions/chat.ts` | Server actions for chat creation, persistence, pending state, and rate checks. |
 | `app/api/chats/route.ts` | Paginated chat history endpoint. |
 | `lib/chat/local-store.ts` | Versioned browser storage for starter-mode chats and eve session cursors. |
 | `lib/chat/persistence-client.ts` | Routes client persistence calls to browser or database storage. |
@@ -160,7 +156,6 @@ State it owns:
 - viewer
 - setup status
 - auth modal state
-- enabled connection toggles
 
 The desktop open/closed state is persisted in a cookie:
 
@@ -361,13 +356,11 @@ The intended order is:
 
 1. Ignore empty input.
 2. Ignore if the session is already busy.
-3. If eve is waiting on connection authorization, do not send regular user
-   text. Show a helpful error instead.
-4. Render an optimistic user bubble immediately when possible.
-5. Run `prepareSend(message)`.
-6. Mark the chat row with `pendingUserMessage`.
-7. Call `agent.send({ message, clientContext })`.
-8. Let `useEveAgent`, `onEvent`, and `onFinish` handle streaming and
+3. Render an optimistic user bubble immediately when possible.
+4. Run `prepareSend(message)`.
+5. Mark the chat row with `pendingUserMessage`.
+6. Call `agent.send({ message })`.
+7. Let `useEveAgent`, `onEvent`, and `onFinish` handle streaming and
    persistence.
 
 `prepareSend` does the things that must happen before talking to eve:
@@ -428,16 +421,12 @@ updates the chat timestamp.
 
 ### Why Snapshot Merging Exists
 
-There are local events that may not come from the remote stream, especially
-locally synthesized authorization skip events. There are also cases where the
-snapshot returned by the hook starts after some initial events that the app
-already loaded from Postgres.
+There are cases where the snapshot returned by the hook starts after some
+initial events that the app already loaded from Postgres.
 
 To avoid losing or duplicating history, `persistSnapshot` applies:
 
 - `preserveKnownInitialEvents(snapshot.events, knownInitialEvents)`
-- `mergeLocalEvents(snapshotEvents, localEvents)`
-- `advanceSessionWithLocalEvents(snapshot.session, localEvents)`
 
 `preserveKnownInitialEvents` is prefix-aware. If the snapshot and known event log
 share a prefix, it preserves the right continuation instead of blindly
@@ -462,7 +451,7 @@ The flow:
 4. `SessionChatPage` consumes it once the controller is ready.
 5. After a settled event is persisted, `getChatForUser` hides stale pending
    messages.
-6. `saveChatSnapshot` and `skipChatAuthorization` clear pending state.
+6. `saveChatSnapshot` clears pending state.
 
 This gives the app a way to recover from "message was accepted by the UI but the
 browser left before eve completed."
@@ -502,102 +491,6 @@ state.
 The resume overlay exists because the main `useEveAgent` instance was initialized
 from the loaded events. New resumed events are layered on top until the final
 snapshot catches up.
-
-## Authorization Flow For Connections
-
-Connections are not string-parsed from assistant text. eve emits structured
-authorization events.
-
-When a connection requires auth, eve emits:
-
-```txt
-authorization.required
-```
-
-`getPendingAuthorizations(displayEvents)` scans the current event log:
-
-- add a pending authorization for each `authorization.required`
-- remove it when a matching `authorization.completed` appears
-
-For each pending authorization, the UI renders `ConnectionAuthorizationPrompt`.
-
-The prompt can show:
-
-- the connection display name
-- the authorization description
-- a Connect link if eve provided one
-- a Skip button
-
-While an authorization is pending, regular chat input is disabled for that
-session. This is intentional because eve is waiting for a structured outcome,
-not a normal user message.
-
-### Connect
-
-Clicking Connect opens the authorization URL provided by eve. After the user
-authorizes the connection, eve should receive the callback and continue the
-turn. The browser stream then receives the next events for that same eve
-session.
-
-### Skip
-
-Skip is a local way to end the authorization wait without connecting the service.
-
-`handleSkipAuthorization`:
-
-1. Stops the current agent stream.
-2. Creates an `authorization.completed` event with outcome `declined`.
-3. Creates a local `session.waiting` event.
-4. Applies those events to the persisted browser session.
-5. Saves them through `skipChatAuthorizationAction`.
-6. Clears pending user message state.
-
-That means "skip" ends the current turn. The next normal user message should
-start a fresh turn with the updated context.
-
-## Connections Menu
-
-The composer footer contains `ComposerFooterControls`, which renders
-`IntegrationsMenu`.
-
-Right now the only user-visible connection toggle is Notion. The toggle state is
-kept in `AgentChatShell` as:
-
-```ts
-enabledConnections = { notion: true }
-```
-
-When a message is sent, the app passes a natural-language `clientContext` to
-eve:
-
-```ts
-createConnectionClientContext(enabledConnections)
-```
-
-If a connection is enabled, the context tells eve which of Notion, Linear, and
-Sentry the user enabled for this turn. Disabled connections are called out so
-the model does not use them unless the user enables them first.
-
-This toggle does not provision, create, or revoke a Vercel Connect connector. It
-only controls per-turn agent behavior.
-
-The actual MCP connectors are configured in `agent/connections/*.ts`. For
-example, Notion is configured in `agent/connections/notion.ts`:
-
-```ts
-const notionConnector = process.env.NOTION_CONNECTOR ?? "notion";
-
-export default defineMcpClientConnection({
-  url: "https://mcp.notion.com/mcp",
-  description: "Notion workspace: search and edit pages and databases.",
-  auth: connect(notionConnector),
-});
-```
-
-For production, set `NOTION_CONNECTOR`, `LINEAR_CONNECTOR`, and
-`SENTRY_CONNECTOR` to the returned Vercel Connect connector UIDs. For local
-development, connectors created with `--name notion`, `--name linear`, and
-`--name sentry` match the fallback names.
 
 ## Auth
 
@@ -804,14 +697,12 @@ Common stream errors:
 
 - stream disconnected before a settled event
 - eve session missing when trying to resume
-- authorization callback not pending
 - rate limit exceeded
 
 The app generally prefers:
 
 - toast for recoverable request failures
 - disabled composer with tooltip for setup blockers
-- structured auth cards for connection blockers
 
 ## Event Log Invariants
 
@@ -821,11 +712,9 @@ These invariants are important:
 2. A completed snapshot should overwrite stale event rows by index.
 3. Rows beyond the final snapshot length should be deleted.
 4. `pendingUserMessage` should be cleared after a settled turn.
-5. Local authorization skip events must be merged into final snapshots.
-6. A pending authorization should disable normal text input for that session.
-7. A route change should reset per-chat refs such as event index and local
+5. A route change should reset per-chat refs such as event index and local
    pending messages.
-8. Sidebar history should update optimistically, but the event log remains the
+6. Sidebar history should update optimistically, but the event log remains the
    source of truth for chat content.
 
 When debugging "messages replaced old messages" or "a response updated after it
@@ -852,22 +741,6 @@ To add a local eve tool:
 Keep tool output structured. The message renderer can make much better UI
 decisions when tool parts contain predictable JSON instead of prose-only output.
 
-## Adding A New Connection
-
-To add another Vercel Connect-backed MCP connection:
-
-1. Add `agent/connections/<name>.ts`.
-2. Use `defineMcpClientConnection`.
-3. Use `connect(process.env.<ENV_NAME> ?? "<local-name>")`.
-4. Add deploy/docs instructions for provisioning that connector.
-5. Extend `EnabledConnections` in `chat-shell-context.tsx`.
-6. Add a toggle in `IntegrationsMenu`.
-7. Update `createConnectionClientContext` so eve receives per-turn intent.
-8. Verify auth-required events render correctly.
-
-Do not parse assistant text to detect auth requirements. Rely on
-`authorization.required` and `authorization.completed` events.
-
 ## Adding A New Channel
 
 This template exposes a web chat channel through `agent/channels/eve.ts`, a
@@ -878,8 +751,7 @@ If you add another channel, keep this separation:
 
 - channel-specific webhook or transport code belongs in `agent/channels/`
 - web chat UI state belongs in `app/_components/` and `components/chat/`
-- cross-channel agent behavior belongs in `agent/instructions.md`, tools, and
-  connections
+- cross-channel agent behavior belongs in `agent/instructions.md` and tools
 
 The web chat persistence code is intentionally tied to the browser experience.
 Do not reuse it as a generic state adapter for every channel without checking
@@ -897,10 +769,8 @@ When making changes to the chat flow, verify:
 6. Refreshing mid-response resumes or ends with a clear error.
 7. Sidebar history remains visible and active row state is correct.
 8. Sidebar pagination still loads older chats.
-9. Pending authorization disables only the affected session.
-10. Connect and Skip both leave the conversation in a usable state.
-11. Setup blockers show tooltips or actionable auth/setup pages.
-12. `pnpm typecheck` and `pnpm build` pass.
+9. Setup blockers show tooltips or actionable auth/setup pages.
+10. `pnpm typecheck` and `pnpm build` pass.
 
 ## Mental Model
 

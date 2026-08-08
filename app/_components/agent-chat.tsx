@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  AuthorizationRequiredStreamEvent,
   ClientSession,
   EveAgentStoreSnapshot,
   EveMessageData,
@@ -14,23 +13,17 @@ import { defaultMessageReducer, useEveAgent } from "eve/react";
 import {
   AlertCircleIcon,
   ChevronDownIcon,
-  ExternalLinkIcon,
   LockIcon,
-  PlugIcon,
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  useChatShell,
-  type EnabledConnections,
-} from "@/app/_components/chat-shell-context";
+import { useChatShell } from "@/app/_components/chat-shell-context";
 import {
   ChatConversation,
   ChatConversationContent,
   ChatScrollButton,
 } from "@/components/chat/conversation";
-import { IntegrationsMenu } from "@/components/chat/integrations-menu";
 import { AgentMessage } from "@/components/chat/message";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -44,7 +37,6 @@ import {
   markClientChatPendingMessage,
   saveClientChatSession,
   saveClientChatSnapshot,
-  skipClientChatAuthorization,
 } from "@/lib/chat/persistence-client";
 import type { ActiveChat, SetupStatus, Viewer } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -52,8 +44,6 @@ import { cn } from "@/lib/utils";
 type AgentSnapshot = EveAgentStoreSnapshot<EveMessageData>;
 type PersistedClientSession = ClientSession & {
   readonly state: SessionState;
-  applyLocalEvents: (events: readonly HandleMessageStreamEvent[]) => SessionState;
-  setState: (session: SessionState) => void;
 };
 type StreamSessionOptions = {
   readonly ignoreLeadingWaiting?: boolean;
@@ -166,24 +156,6 @@ function createPersistedClientSession({
         signal: options?.signal,
         startIndex,
       });
-    },
-    applyLocalEvents(events: readonly HandleMessageStreamEvent[]) {
-      if (!session.sessionId) {
-        throw new Error("Session has no session ID.");
-      }
-
-      session = advanceBrowserSession({
-        baseStreamIndex: session.streamIndex,
-        continuationToken: session.continuationToken,
-        events,
-        session,
-        sessionId: session.sessionId,
-      });
-
-      return session;
-    },
-    setState(nextSession: SessionState) {
-      session = nextSession;
     },
   } as unknown as PersistedClientSession;
 }
@@ -512,16 +484,6 @@ function advanceBrowserSession({
     };
   }
 
-  const lastEvent = events.at(-1);
-
-  if (lastEvent?.type === "authorization.required") {
-    return {
-      continuationToken: continuationToken ?? session.continuationToken,
-      sessionId,
-      streamIndex: baseStreamIndex + events.length,
-    };
-  }
-
   return createInitialSessionState();
 }
 
@@ -679,7 +641,6 @@ export function AgentChatSession({
 }) {
   const {
     activeChatId: shellActiveChatId,
-    enabledConnections,
     requestSignIn,
     setActiveChatId: setShellActiveChatId,
     setupStatus,
@@ -694,14 +655,12 @@ export function AgentChatSession({
   const [isResuming, setIsResuming] = useState(false);
   const [isFinalizingTurn, setIsFinalizingTurn] = useState(false);
   const [streamEvents, setStreamEvents] = useState<HandleMessageStreamEvent[]>([]);
-  const [localEvents, setLocalEvents] = useState<HandleMessageStreamEvent[]>([]);
   const {
     clearMessage: clearLocalPendingUserMessage,
     message: localPendingUserMessage,
     messageRef: localPendingUserMessageRef,
     setMessage: setLocalPendingUserMessage,
   } = usePendingUserMessage();
-  const [skippingAuthorizationKey, setSkippingAuthorizationKey] = useState<string | null>(null);
   const activeChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
   const eventIndexRef = useRef(activeChat?.events.length ?? 0);
   const eventIndexChatIdRef = useRef(activeChat?.id ?? chatId ?? null);
@@ -712,7 +671,6 @@ export function AgentChatSession({
   const resumeStartedRef = useRef(false);
   const resumedEventsRef = useRef<HandleMessageStreamEvent[]>([]);
   const streamEventsRef = useRef<HandleMessageStreamEvent[]>([]);
-  const localEventsRef = useRef<HandleMessageStreamEvent[]>([]);
   const onSessionStartedRef = useRef<(session: SessionState) => Promise<void> | void>(
     () => {},
   );
@@ -769,12 +727,8 @@ export function AgentChatSession({
                 snapshot.events,
                 knownInitialEventsRef.current,
               );
-        const events = mergeLocalEvents(snapshotEvents, localEventsRef.current);
-
-        const session = advanceSessionWithLocalEvents(
-          snapshot.session,
-          localEventsRef.current,
-        );
+        const events = snapshotEvents;
+        const session = snapshot.session;
 
         await saveClientChatSnapshot(storageMode, {
           chatId,
@@ -832,10 +786,6 @@ export function AgentChatSession({
         setStreamEvents(nextStreamEvents);
       }
 
-      if (displayEvent.type === "authorization.required") {
-        stopFinalizingTurn();
-      }
-
       const chatId = activeChatIdRef.current;
 
       if (!viewer || !chatId) {
@@ -855,7 +805,7 @@ export function AgentChatSession({
         );
       });
     },
-    [stopFinalizingTurn, storageMode, viewer],
+    [storageMode, viewer],
   );
 
   const persistSessionState = useCallback(
@@ -900,23 +850,18 @@ export function AgentChatSession({
     () => mergeStreamEventLogs(activeChat?.events ?? [], streamEvents),
     [activeChat?.events, streamEvents],
   );
-  const baseDisplayEvents = hasResumeOverlay ? resumedEventLog : agentEventLog;
-  const displayEvents = useMemo(
-    () => mergeLocalEvents(baseDisplayEvents, localEvents),
-    [baseDisplayEvents, localEvents],
-  );
+  const displayEvents = hasResumeOverlay ? resumedEventLog : agentEventLog;
   const displayData = useMemo(() => reduceEventsToMessageData(displayEvents), [displayEvents]);
   const displayMessages = displayData.messages;
   const displayChatId = chatId ?? activeChatId ?? "new";
   const hasLocalPendingUserMessage = Boolean(localPendingUserMessage);
-  const pendingAuthorizations = getPendingAuthorizations(displayEvents);
-  const isWaitingForAuthorization = pendingAuthorizations.length > 0;
   const hasOpenTurn = useMemo(() => hasOpenChatTurn(displayEvents), [displayEvents]);
   const isBusy =
     isResuming ||
     hasLocalPendingUserMessage ||
-    (!isWaitingForAuthorization &&
-      (hasOpenTurn || agent.status === "submitted" || agent.status === "streaming"));
+    hasOpenTurn ||
+    agent.status === "submitted" ||
+    agent.status === "streaming";
   const isTurnBlocked = isBusy || isFinalizingTurn;
   const pendingMessage = pendingUserMessage
     ? createPendingUserMessage(displayChatId, pendingUserMessage)
@@ -928,23 +873,15 @@ export function AgentChatSession({
         "local-pending-user-message",
       )
     : null;
-  const disabledReason = isWaitingForAuthorization
-    ? getConnectionAuthorizationDisabledReason(pendingAuthorizations)
-    : isFinalizingTurn
-      ? "Finishing response."
-    : undefined;
+  const disabledReason = isFinalizingTurn ? "Finishing response." : undefined;
   const visibleMessages = appendPendingUserMessages(displayMessages, [
     pendingMessage,
     localPendingMessage,
   ]);
-  const isEmpty =
-    visibleMessages.length === 0 &&
-    !isTurnBlocked &&
-    !isWaitingForAuthorization;
+  const isEmpty = visibleMessages.length === 0 && !isTurnBlocked;
   const isChatRoute = Boolean(shellActiveChatId || chatId);
   const showThinking =
-    !isWaitingForAuthorization &&
-    (Boolean(pendingMessage || localPendingMessage) || hasOpenTurn || isTurnBlocked);
+    Boolean(pendingMessage || localPendingMessage) || hasOpenTurn || isTurnBlocked;
   const thinkingPresence = useThinkingPresence(showThinking);
   const displayError = clientError ?? agent.error?.message ?? null;
   const toastError = displayError && dismissedError !== displayError ? displayError : null;
@@ -961,10 +898,8 @@ export function AgentChatSession({
     resumeStartedRef.current = false;
     resumedEventsRef.current = [];
     streamEventsRef.current = [];
-    localEventsRef.current = [];
     setResumedEvents([]);
     setStreamEvents([]);
-    setLocalEvents([]);
     stopFinalizingTurn();
     clearLocalPendingUserMessage();
     setIsResuming(false);
@@ -1014,12 +949,6 @@ export function AgentChatSession({
 
       if (lengthError) {
         setClientError(lengthError);
-        return;
-      }
-
-      if (isWaitingForAuthorization) {
-        draftHandlers.restoreDraft(message);
-        setClientError(disabledReason ?? "Connect the requested service before continuing.");
         return;
       }
 
@@ -1096,13 +1025,7 @@ export function AgentChatSession({
 
       try {
         startFinalizingTurn();
-        await agent.send({
-          clientContext: createConnectionClientContext(
-            enabledConnections,
-            setupStatus.connectionsAvailable,
-          ),
-          message,
-        });
+        await agent.send({ message });
       } catch (error) {
         if (isAbortError(error)) {
           return;
@@ -1116,15 +1039,11 @@ export function AgentChatSession({
     [
       agent,
       clearLocalPendingUserMessage,
-      disabledReason,
-      enabledConnections,
       isSetupReady,
       isTurnBlocked,
-      isWaitingForAuthorization,
       prepareSend,
       requestSignIn,
       setLocalPendingUserMessage,
-      setupStatus.connectionsAvailable,
       startFinalizingTurn,
       storageMode,
       stopFinalizingTurn,
@@ -1182,105 +1101,6 @@ export function AgentChatSession({
     ],
   );
 
-  const handleSkipAuthorization = useCallback(
-    async (authorization: PendingConnectionAuthorization) => {
-      const chatId = activeChatIdRef.current;
-
-      if (!viewer) {
-        requestSignIn();
-        return;
-      }
-
-      if (!chatId) {
-        setClientError("Start a chat before skipping authorization.");
-        return;
-      }
-
-      const events = createAuthorizationDeclinedEvents(authorization);
-      const persistedSession = persistedSessionRef.current;
-
-      if (!persistedSession?.state.sessionId) {
-        setClientError("Session is not ready to skip authorization.");
-        return;
-      }
-
-      const previousSession = persistedSession.state;
-      const nextSession = createInitialSessionState();
-
-      agent.stop();
-      persistedSession.setState(nextSession);
-
-      const nextLocalEvents = mergeLocalEvents(localEventsRef.current, events);
-
-      localEventsRef.current = nextLocalEvents;
-      setLocalEvents(nextLocalEvents);
-      setSkippingAuthorizationKey(authorization.key);
-      setClientError(null);
-
-      try {
-        const result = await skipClientChatAuthorization(storageMode, {
-          chatId,
-          events,
-          session: nextSession,
-        });
-        const skippedEvents = mergeLocalEvents(displayEvents, events);
-
-        eventIndexRef.current = Math.max(
-          eventIndexRef.current,
-          result.eventIndex + result.eventCount,
-        );
-        knownInitialEventsRef.current = skippedEvents;
-        const nextStreamEvents = events.reduce<HandleMessageStreamEvent[]>(
-          (mergedEvents, event) => appendUniqueStreamEvent(mergedEvents, event),
-          streamEventsRef.current,
-        );
-
-        streamEventsRef.current = nextStreamEvents;
-        setStreamEvents(nextStreamEvents);
-        localEventsRef.current = [];
-        setLocalEvents([]);
-        touchChat(result.chat);
-        onActiveChatUpdated?.({
-          events: skippedEvents,
-          id: chatId,
-          pendingUserMessage: null,
-          session: nextSession,
-          title: currentTitleRef.current,
-        });
-        onPendingUserMessageSettled?.();
-      } catch (error) {
-        if (previousSession) {
-          persistedSessionRef.current?.setState(previousSession);
-        }
-
-        const eventKeys = new Set(events.map(getLocalEventKey).filter(Boolean));
-        const revertedEvents = localEventsRef.current.filter((localEvent) => {
-          const key = getLocalEventKey(localEvent);
-
-          return !key || !eventKeys.has(key);
-        });
-
-        localEventsRef.current = revertedEvents;
-        setLocalEvents(revertedEvents);
-        setClientError(
-          error instanceof Error ? error.message : "Failed to skip authorization.",
-        );
-      } finally {
-        setSkippingAuthorizationKey(null);
-      }
-    },
-    [
-      agent,
-      displayEvents,
-      onActiveChatUpdated,
-      onPendingUserMessageSettled,
-      requestSignIn,
-      storageMode,
-      touchChat,
-      viewer,
-    ],
-  );
-
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
@@ -1297,9 +1117,7 @@ export function AgentChatSession({
       eventIndexRef.current = nextEventIndex;
       knownInitialEventsRef.current = activeChat?.events ?? [];
       streamEventsRef.current = [];
-      localEventsRef.current = [];
       setStreamEvents([]);
-      setLocalEvents([]);
       stopFinalizingTurn();
       clearLocalPendingUserMessage();
     } else if (!isTurnBlocked) {
@@ -1486,7 +1304,7 @@ export function AgentChatSession({
       {
         disabledReason,
         isBusy,
-        isDisabled: !isSetupReady || isWaitingForAuthorization || isFinalizingTurn,
+        isDisabled: !isSetupReady || isFinalizingTurn,
         isEmpty,
       },
     );
@@ -1497,7 +1315,6 @@ export function AgentChatSession({
     isFinalizingTurn,
     isEmpty,
     isSetupReady,
-    isWaitingForAuthorization,
     onControllerChange,
     resetSession,
     sendMessage,
@@ -1533,10 +1350,7 @@ export function AgentChatSession({
                 {visibleMessages.map((message, index) => (
                   <AgentMessage
                     canRespond={
-                      !isTurnBlocked &&
-                      !isWaitingForAuthorization &&
-                      Boolean(viewer) &&
-                      isSetupReady
+                      !isTurnBlocked && Boolean(viewer) && isSetupReady
                     }
                     isStreaming={
                       agent.status === "streaming" && index === visibleMessages.length - 1
@@ -1544,14 +1358,6 @@ export function AgentChatSession({
                     key={message.id}
                     message={message}
                     onInputResponses={handleInputResponses}
-                  />
-                ))}
-                {pendingAuthorizations.map((authorization) => (
-                  <ConnectionAuthorizationPrompt
-                    authorization={authorization}
-                    isSkipping={skippingAuthorizationKey === authorization.key}
-                    key={authorization.key}
-                    onSkip={handleSkipAuthorization}
                   />
                 ))}
                 {thinkingPresence.shouldRender ? (
@@ -1565,198 +1371,6 @@ export function AgentChatSession({
       )}
     </>
   );
-}
-
-type PendingConnectionAuthorization = {
-  readonly description: string;
-  readonly displayName: string;
-  readonly expiresAt?: string;
-  readonly instructions?: string;
-  readonly key: string;
-  readonly name: string;
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-  readonly url?: string;
-  readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
-};
-
-function getPendingAuthorizations(events: readonly HandleMessageStreamEvent[]) {
-  const pending = new Map<string, PendingConnectionAuthorization>();
-
-  for (const event of events) {
-    if (event.type === "authorization.required") {
-      const authorization = toPendingAuthorization(event);
-      pending.set(authorization.name, authorization);
-      continue;
-    }
-
-    if (event.type === "authorization.completed") {
-      pending.delete(event.data.name);
-    }
-  }
-
-  return [...pending.values()];
-}
-
-function getConnectionAuthorizationDisabledReason(
-  authorizations: readonly PendingConnectionAuthorization[],
-) {
-  const displayName = authorizations[0]?.displayName ?? "the requested service";
-
-  return `Connect ${displayName} to continue this turn, or skip it.`;
-}
-
-function toPendingAuthorization(
-  event: AuthorizationRequiredStreamEvent,
-): PendingConnectionAuthorization {
-  const challenge = event.data.authorization;
-  const displayName = challenge?.displayName ?? event.data.name;
-
-  return {
-    authorization: challenge,
-    description:
-      challenge?.instructions ??
-      event.data.description ??
-      `Connect ${displayName} to let eve continue.`,
-    displayName,
-    expiresAt: challenge?.expiresAt,
-    instructions: challenge?.instructions,
-    key: `${event.data.turnId}:${event.data.name}`,
-    name: event.data.name,
-    sequence: event.data.sequence,
-    stepIndex: event.data.stepIndex,
-    turnId: event.data.turnId,
-    url: challenge?.url,
-  };
-}
-
-function ConnectionAuthorizationPrompt({
-  authorization,
-  isSkipping,
-  onSkip,
-}: {
-  readonly authorization: PendingConnectionAuthorization;
-  readonly isSkipping: boolean;
-  readonly onSkip: (authorization: PendingConnectionAuthorization) => Promise<void>;
-}) {
-  return (
-    <article aria-live="polite" className="flex w-full justify-start px-3">
-      <div className="w-full max-w-md rounded-lg border border-border/70 bg-muted/20 p-3 text-sm shadow-sm">
-        <div className="flex gap-3">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
-            <PlugIcon className="size-4" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="font-medium text-foreground">Connect {authorization.displayName}</p>
-            <p className="mt-1 text-muted-foreground">
-              {authorization.description}
-            </p>
-            <div className="mt-2.5 flex items-center gap-2">
-              {authorization.url ? (
-                <Button asChild size="xs" type="button">
-                  <a
-                    href={authorization.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Connect
-                    <ExternalLinkIcon className="size-3" />
-                  </a>
-                </Button>
-              ) : null}
-              <Button
-                disabled={isSkipping}
-                onClick={() => {
-                  void onSkip(authorization);
-                }}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                {isSkipping ? "Skipping..." : "Skip"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function createAuthorizationDeclinedEvents(
-  authorization: PendingConnectionAuthorization,
-): readonly HandleMessageStreamEvent[] {
-  return [
-    {
-      data: {
-        authorization: authorization.authorization,
-        name: authorization.name,
-        outcome: "declined",
-        reason: "skipped",
-        sequence: authorization.sequence,
-        stepIndex: authorization.stepIndex,
-        turnId: authorization.turnId,
-      },
-      type: "authorization.completed",
-    },
-    createSessionWaitingEvent(),
-  ];
-}
-
-function createSessionWaitingEvent(): HandleMessageStreamEvent {
-  return {
-    data: {
-      wait: "next-user-message",
-    },
-    meta: {
-      at: new Date().toISOString(),
-    },
-    type: "session.waiting",
-  };
-}
-
-function advanceSessionWithLocalEvents(
-  session: SessionState,
-  events: readonly HandleMessageStreamEvent[],
-) {
-  if (events.length === 0 || !session.sessionId) {
-    return session;
-  }
-
-  return advanceBrowserSession({
-    baseStreamIndex: session.streamIndex,
-    continuationToken: session.continuationToken,
-    events,
-    session,
-    sessionId: session.sessionId,
-  });
-}
-
-function mergeLocalEvents(
-  events: readonly HandleMessageStreamEvent[],
-  localEvents: readonly HandleMessageStreamEvent[],
-): HandleMessageStreamEvent[] {
-  const merged = [...events];
-
-  if (localEvents.length === 0) {
-    return merged;
-  }
-
-  const keys = new Set(events.map(getLocalEventKey).filter(Boolean));
-
-  for (const event of localEvents) {
-    const key = getLocalEventKey(event);
-
-    if (!key || keys.has(key)) {
-      continue;
-    }
-
-    keys.add(key);
-    merged.push(event);
-  }
-
-  return merged;
 }
 
 function mergeStreamEventLogs(
@@ -1879,18 +1493,6 @@ function areEqualJsonValues(left: unknown, right: unknown): boolean {
   );
 }
 
-function getLocalEventKey(event: HandleMessageStreamEvent) {
-  if (event.type === "authorization.completed") {
-    return `${event.type}:${event.data.turnId}:${event.data.name}:${event.data.outcome}:${event.data.reason ?? ""}`;
-  }
-
-  if (event.type === "session.waiting") {
-    return `${event.type}:${event.meta?.at ?? "local"}`;
-  }
-
-  return null;
-}
-
 function appendPendingUserMessages(
   messages: readonly EveMessageData["messages"][number][],
   pendingMessages: readonly (EveMessage | null)[],
@@ -1946,43 +1548,6 @@ function usePendingUserMessage() {
   }, [setMessage]);
 
   return { clearMessage, message, messageRef, setMessage };
-}
-
-const CONNECTION_LABELS = {
-  linear: "Linear",
-  notion: "Notion",
-  sentry: "Sentry",
-} satisfies Record<keyof EnabledConnections, string>;
-
-function createConnectionClientContext(
-  enabledConnections: EnabledConnections,
-  connectionsAvailable: boolean,
-) {
-  if (!connectionsAvailable) {
-    return "No external connections are configured. Do not search or call connection tools.";
-  }
-
-  const entries = Object.entries(CONNECTION_LABELS) as [
-    keyof EnabledConnections,
-    string,
-  ][];
-  const enabled = entries
-    .filter(([connection]) => enabledConnections[connection])
-    .map(([, label]) => label);
-  const disabled = entries
-    .filter(([connection]) => !enabledConnections[connection])
-    .map(([, label]) => label);
-
-  if (enabled.length > 0) {
-    const disabledContext =
-      disabled.length > 0
-        ? ` Do not use disabled connections unless the user enables them first: ${disabled.join(", ")}.`
-        : "";
-
-    return `The user has enabled these external connections for this turn: ${enabled.join(", ")}. Use an enabled connection when it is relevant to the user's request.${disabledContext}`;
-  }
-
-  return "The user has disabled all external connections for this turn. Do not search or call connection tools unless the user enables a connection first.";
 }
 
 function useThinkingPresence(active: boolean) {
@@ -2098,20 +1663,7 @@ export function ComposerFooterControls({
 }: {
   readonly setupStatus: SetupStatus;
 }) {
-  const { enabledConnections, setConnectionEnabled } = useChatShell();
-
-  return (
-    <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
-      <ComposerHint setupStatus={setupStatus} />
-      {setupStatus.connectionsAvailable ? (
-        <IntegrationsMenu
-          enabledConnections={enabledConnections}
-          onConnectionEnabledChange={setConnectionEnabled}
-          setupStatus={setupStatus}
-        />
-      ) : null}
-    </div>
-  );
+  return <ComposerHint setupStatus={setupStatus} />;
 }
 
 function ComposerHint({ setupStatus }: { readonly setupStatus: SetupStatus }) {

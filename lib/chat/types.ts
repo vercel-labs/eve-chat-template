@@ -33,7 +33,6 @@ export type SetupStatus = {
   readonly appReady: boolean;
   readonly authMode: AuthMode;
   readonly authReady: boolean;
-  readonly connectionsAvailable: boolean;
   readonly databaseConfigured: boolean;
   readonly databaseReady: boolean;
   readonly databaseSchemaReady: boolean;
