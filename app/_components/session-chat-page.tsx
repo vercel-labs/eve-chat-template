@@ -418,14 +418,7 @@ export function SessionChatPage({
 }
 
 function getSessionInstanceKey(chatId: string, activeChat: ActiveChat | null) {
-  if (!activeChat) {
-    return `${chatId}:loading`;
-  }
-
-  const sessionId = activeChat.session?.sessionId ?? "new";
-  const streamIndex = activeChat.session?.streamIndex ?? 0;
-
-  return `${chatId}:${sessionId}:${streamIndex}:${activeChat.events.length}`;
+  return `${chatId}:${activeChat ? "ready" : "loading"}`;
 }
 
 function getRestorablePendingUserMessage(
