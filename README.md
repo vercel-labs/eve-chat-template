@@ -1,9 +1,8 @@
 # eve Chat Template
 
 > [!IMPORTANT]
-> This repository is archived and no longer maintained. The eve Chat Template
-> now lives in
-> [`vercel/eve-examples/eve-chat-template`](https://github.com/vercel/eve-examples/tree/main/eve-chat-template).
+> This repository is archived and no longer maintained. The maintained eve
+> templates now live in [`vercel/eve-examples`](https://github.com/vercel/eve-examples).
 
 A Next.js chat template for [eve](https://eve.dev) that starts with password access and browser-persisted chats, then upgrades to Sign in with Vercel, Neon, and Upstash when you need a production multi-user application.
 
